@@ -1,7 +1,16 @@
 from pathlib import Path
 
+import pytest
+
 from backend.app.permissions.models import PermissionAction
 from backend.app.permissions.policy import evaluate_default_policy, shell_is_destructive
+
+
+def _ensure_symlink_or_skip(link: Path, target: Path) -> None:
+    try:
+        link.symlink_to(target)
+    except OSError as exc:
+        pytest.skip(f"symlink privilege unavailable on this Windows session: {exc}")
 
 
 def test_default_read_is_allowed() -> None:
@@ -84,7 +93,7 @@ def test_path_traversal_and_symlink_resolved_path_trigger_external_directory(tmp
     target = outside / "secret.txt"
     target.write_text("secret", encoding="utf-8")
     link = workspace / "link.txt"
-    link.symlink_to(target)
+    _ensure_symlink_or_skip(link, target)
 
     decision = evaluate_default_policy(
         permission_key="read.file",

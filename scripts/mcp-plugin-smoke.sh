@@ -2,10 +2,17 @@
 set -euo pipefail
 
 BACKEND_URL="${BACKEND_URL:-${AP_BACKEND_URL:-http://localhost:8000}}"
+PYTHON_BIN="python3"
+
+if [[ -x ".venv/Scripts/python.exe" ]]; then
+  PYTHON_BIN=".venv/Scripts/python.exe"
+elif [[ -x ".venv/bin/python" ]]; then
+  PYTHON_BIN=".venv/bin/python"
+fi
 
 echo "mcp/plugin smoke: backend=${BACKEND_URL}"
 
-python3 - <<'PY'
+"${PYTHON_BIN}" - <<'PY'
 import json
 import os
 import tempfile

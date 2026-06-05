@@ -2,6 +2,15 @@
 set -euo pipefail
 
 DATABASE_URL="${AP_TEST_POSTGRES_URL:-${AP_DATABASE_URL:-}}"
+VENV_PYTHON=".venv/bin/python"
+VENV_ALEMBIC=".venv/bin/alembic"
+
+if [[ -x ".venv/Scripts/python.exe" ]]; then
+  VENV_PYTHON=".venv/Scripts/python.exe"
+fi
+if [[ -x ".venv/Scripts/alembic.exe" ]]; then
+  VENV_ALEMBIC=".venv/Scripts/alembic.exe"
+fi
 
 if [[ -z "${DATABASE_URL}" ]]; then
   echo "AP_TEST_POSTGRES_URL or AP_DATABASE_URL must point at a real PostgreSQL database." >&2
@@ -10,9 +19,9 @@ fi
 
 export AP_DATABASE_URL="${DATABASE_URL}"
 
-.venv/bin/alembic -c backend/alembic.ini upgrade head
+"${VENV_ALEMBIC}" -c backend/alembic.ini upgrade head
 
-.venv/bin/python - <<'PY'
+"${VENV_PYTHON}" - <<'PY'
 import os
 
 import psycopg

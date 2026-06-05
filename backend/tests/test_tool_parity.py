@@ -28,6 +28,13 @@ def _ctx(workspace_root: Path) -> ToolContext:
     )
 
 
+def _ensure_symlink_or_skip(link: Path, target: Path) -> None:
+    try:
+        link.symlink_to(target)
+    except OSError as exc:
+        pytest.skip(f"symlink privilege unavailable on this Windows session: {exc}")
+
+
 def test_tool_result_failure_is_structured() -> None:
     result = ToolResult.failure(
         code="example_error",
@@ -52,7 +59,7 @@ async def test_read_file_line_range_binary_and_symlink_safety(tmp_path) -> None:
     (workspace / "notes.txt").write_text("alpha\nbeta\ngamma\n", encoding="utf-8")
     (workspace / "blob.bin").write_bytes(b"abc\x00def")
     (outside / "secret.txt").write_text("outside", encoding="utf-8")
-    (workspace / "outside-link.txt").symlink_to(outside / "secret.txt")
+    _ensure_symlink_or_skip(workspace / "outside-link.txt", outside / "secret.txt")
 
     tool = ReadFileTool()
     context = _ctx(workspace)
@@ -227,7 +234,7 @@ async def test_glob_search_hidden_exclude_limits_and_symlink_block(tmp_path) -> 
     (workspace / ".hidden.py").write_text("", encoding="utf-8")
     (workspace / "skip.py").write_text("", encoding="utf-8")
     (outside / "external.py").write_text("", encoding="utf-8")
-    (workspace / "external-link.py").symlink_to(outside / "external.py")
+    _ensure_symlink_or_skip(workspace / "external-link.py", outside / "external.py")
     context = _ctx(workspace)
     tool = GlobSearchTool()
 

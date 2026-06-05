@@ -1,5 +1,9 @@
 import asyncio
 import os
+import re
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -52,8 +56,9 @@ class BashRunTool(BaseTool):
                 recoverable=False,
                 metadata={"classification": classification, "cwd": str(cwd)},
             )
+        command = normalize_command(input_data.command)
         proc = await asyncio.create_subprocess_shell(
-            input_data.command,
+            command,
             cwd=str(cwd),
             env=scrub_process_env(os.environ),
             stdout=asyncio.subprocess.PIPE,
@@ -104,3 +109,28 @@ def classify_command(command: str) -> dict[str, object]:
         "reason": None,
         "risky_composition": risky_composition,
     }
+
+
+def normalize_command(command: str) -> str:
+    if os.name != "nt":
+        return command
+    python_executable = _resolve_python_executable()
+    if not python_executable:
+        return command
+    match = re.match(r"^\s*python3\s+-c\s+'(?P<code>.*)'\s*$", command, flags=re.DOTALL)
+    if match:
+        return subprocess.list2cmdline([python_executable, "-c", match.group("code")])
+    return command
+
+
+def _resolve_python_executable() -> str | None:
+    candidates = [sys.executable, shutil.which("python3"), shutil.which("python")]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        path = Path(candidate)
+        if path.name.lower() in {"python.exe", "python3.exe"} and "windowsapps" in {part.lower() for part in path.parts}:
+            continue
+        if path.exists():
+            return str(path)
+    return None

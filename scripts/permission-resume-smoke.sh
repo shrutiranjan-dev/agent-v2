@@ -4,6 +4,19 @@ set -euo pipefail
 API_BASE="${API_BASE:-http://localhost:8000}"
 DATABASE_URL="${AP_TEST_POSTGRES_URL:-${AP_DATABASE_URL:-}}"
 SKIP_EXTERNAL="${SKIP_EXTERNAL:-0}"
+VENV_PYTHON=".venv/bin/python"
+SMOKE_TMP_DIR="${SMOKE_TMP_DIR:-$(pwd)/.tmp/smokes}"
+mkdir -p "${SMOKE_TMP_DIR}"
+if command -v cygpath >/dev/null 2>&1; then
+  SMOKE_TMP_DIR_PY="$(cygpath -w "${SMOKE_TMP_DIR}")"
+else
+  SMOKE_TMP_DIR_PY="${SMOKE_TMP_DIR}"
+fi
+export SMOKE_TMP_DIR SMOKE_TMP_DIR_PY
+
+if [[ -x ".venv/Scripts/python.exe" ]]; then
+  VENV_PYTHON=".venv/Scripts/python.exe"
+fi
 
 log() {
   printf '[permission-resume-smoke] %s\n' "$*"
@@ -31,19 +44,20 @@ curl_json() {
 }
 
 command -v curl >/dev/null 2>&1 || fail_or_skip "curl is required"
-[[ -x .venv/bin/python ]] || fail_or_skip ".venv/bin/python is required"
+[[ -x "${VENV_PYTHON}" ]] || fail_or_skip "project venv python is required"
 [[ -n "${DATABASE_URL}" ]] || fail_or_skip "AP_TEST_POSTGRES_URL or AP_DATABASE_URL must point at the running Postgres database"
 
 log "checking backend health at ${API_BASE}"
-curl_json GET /health >/tmp/permission-smoke-health.json || fail_or_skip "backend health is unreachable"
+curl_json GET /health >"${SMOKE_TMP_DIR}/permission-smoke-health.json" || fail_or_skip "backend health is unreachable"
 
 log "checking queue worker dependency state"
-curl_json GET /health/dependencies >/tmp/permission-smoke-dependencies.json
-.venv/bin/python - <<'PY'
+curl_json GET /health/dependencies >"${SMOKE_TMP_DIR}/permission-smoke-dependencies.json"
+"${VENV_PYTHON}" - <<'PY'
 import json
+import os
 from pathlib import Path
 
-payload = json.loads(Path("/tmp/permission-smoke-dependencies.json").read_text())
+payload = json.loads((Path(os.environ["SMOKE_TMP_DIR_PY"]) / "permission-smoke-dependencies.json").read_text())
 redis_status = payload.get("dependencies", {}).get("redis", {}).get("status")
 postgres_status = payload.get("dependencies", {}).get("postgres", {}).get("status")
 if redis_status != "ok" or postgres_status != "ok":
@@ -51,12 +65,13 @@ if redis_status != "ok" or postgres_status != "ok":
 PY
 
 log "selecting model"
-curl_json GET /models >/tmp/permission-smoke-models.json
-MODEL_NAME="$(.venv/bin/python - <<'PY'
+curl_json GET /models >"${SMOKE_TMP_DIR}/permission-smoke-models.json"
+MODEL_NAME="$("${VENV_PYTHON}" - <<'PY'
 import json
+import os
 from pathlib import Path
 
-models = json.loads(Path("/tmp/permission-smoke-models.json").read_text()).get("models", [])
+models = json.loads((Path(os.environ["SMOKE_TMP_DIR_PY"]) / "permission-smoke-models.json").read_text()).get("models", [])
 preferred = ("llama3.2", "llama", "deepseek", "qwen")
 names = [model.get("name") or model.get("model") for model in models]
 names = [name for name in names if name]
@@ -76,18 +91,20 @@ PY
 [[ -n "${MODEL_NAME}" ]] || fail_or_skip "No Ollama model returned by /models"
 
 log "creating build session"
-curl_json POST /sessions "{\"title\":\"Permission resume smoke\",\"agent_id\":\"build\",\"model_name\":\"${MODEL_NAME}\"}" >/tmp/permission-smoke-session.json
-SESSION_ID="$(.venv/bin/python - <<'PY'
+curl_json POST /sessions "{\"title\":\"Permission resume smoke\",\"agent_id\":\"build\",\"model_name\":\"${MODEL_NAME}\"}" >"${SMOKE_TMP_DIR}/permission-smoke-session.json"
+SESSION_ID="$("${VENV_PYTHON}" - <<'PY'
 import json
+import os
 from pathlib import Path
-print(json.loads(Path("/tmp/permission-smoke-session.json").read_text())["session"]["id"])
+print(json.loads((Path(os.environ["SMOKE_TMP_DIR_PY"]) / "permission-smoke-session.json").read_text())["session"]["id"])
 PY
 )"
 export SESSION_ID
 export AP_DATABASE_URL="${DATABASE_URL}"
+mkdir -p tmp
 
 log "seeding pending write.file permission for session ${SESSION_ID}"
-.venv/bin/python - <<'PY' >/tmp/permission-smoke-seeded.json
+"${VENV_PYTHON}" - <<'PY' >"${SMOKE_TMP_DIR}/permission-smoke-seeded.json"
 import json
 import os
 from datetime import datetime, timezone
@@ -195,32 +212,36 @@ print(json.dumps({
 }))
 PY
 
-PERMISSION_ID="$(.venv/bin/python - <<'PY'
+PERMISSION_ID="$("${VENV_PYTHON}" - <<'PY'
 import json
+import os
 from pathlib import Path
-print(json.loads(Path("/tmp/permission-smoke-seeded.json").read_text())["permission_request_id"])
+print(json.loads((Path(os.environ["SMOKE_TMP_DIR_PY"]) / "permission-smoke-seeded.json").read_text())["permission_request_id"])
 PY
 )"
-TOOL_CALL_ID="$(.venv/bin/python - <<'PY'
+TOOL_CALL_ID="$("${VENV_PYTHON}" - <<'PY'
 import json
+import os
 from pathlib import Path
-print(json.loads(Path("/tmp/permission-smoke-seeded.json").read_text())["tool_call_id"])
+print(json.loads((Path(os.environ["SMOKE_TMP_DIR_PY"]) / "permission-smoke-seeded.json").read_text())["tool_call_id"])
 PY
 )"
-TARGET_PATH="$(.venv/bin/python - <<'PY'
+TARGET_PATH="$("${VENV_PYTHON}" - <<'PY'
 import json
+import os
 from pathlib import Path
-print(json.loads(Path("/tmp/permission-smoke-seeded.json").read_text())["target_path"])
+print(json.loads((Path(os.environ["SMOKE_TMP_DIR_PY"]) / "permission-smoke-seeded.json").read_text())["target_path"])
 PY
 )"
 export PERMISSION_ID TOOL_CALL_ID TARGET_PATH
 
 log "approving permission ${PERMISSION_ID}"
-curl_json POST "/permissions/${PERMISSION_ID}/approve" '{"message":"permission resume smoke approval"}' >/tmp/permission-smoke-approve.json
-.venv/bin/python - <<'PY'
+curl_json POST "/permissions/${PERMISSION_ID}/approve" '{"message":"permission resume smoke approval"}' >"${SMOKE_TMP_DIR}/permission-smoke-approve.json"
+"${VENV_PYTHON}" - <<'PY'
 import json
+import os
 from pathlib import Path
-payload = json.loads(Path("/tmp/permission-smoke-approve.json").read_text())
+payload = json.loads((Path(os.environ["SMOKE_TMP_DIR_PY"]) / "permission-smoke-approve.json").read_text())
 if payload.get("agent_run", {}).get("status") != "resume_queued":
     raise SystemExit(f"expected resume_queued response, got {payload}")
 if not payload.get("queue_job"):
@@ -229,7 +250,7 @@ print("approval queued")
 PY
 
 log "waiting for worker to execute approved tool"
-.venv/bin/python - <<'PY'
+"${VENV_PYTHON}" - <<'PY'
 import json
 import os
 import time
@@ -258,7 +279,7 @@ for _ in range(120):
         raise SystemExit(f"tool call failed: {matches[0]}")
     time.sleep(2)
 else:
-    Path("/tmp/permission-smoke-last-session.json").write_text(json.dumps(last or {}, indent=2))
+    (Path(os.environ["SMOKE_TMP_DIR_PY"]) / "permission-smoke-last-session.json").write_text(json.dumps(last or {}, indent=2))
     raise SystemExit("approved tool call did not complete before timeout")
 
 with urlopen(f"{api_base}/sessions/{session_id}/events", timeout=5) as response:

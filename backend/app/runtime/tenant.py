@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.config import get_settings
@@ -24,66 +25,58 @@ async def ensure_runtime_tenant(db: AsyncSession, ctx: TenantContext) -> Runtime
         if not org:
             raise ValueError(f"Organization not found: {ctx.organization_id}")
     else:
-        org = await db.scalar(
-            select(Organization).where(Organization.slug == settings.bootstrap_organization_slug)
+        org = await get_or_create_runtime_row(
+            db,
+            select(Organization).where(Organization.slug == settings.bootstrap_organization_slug),
+            lambda: Organization(name="Local Organization", slug=settings.bootstrap_organization_slug),
         )
-        if not org:
-            org = Organization(name="Local Organization", slug=settings.bootstrap_organization_slug)
-            db.add(org)
-            await db.flush()
 
     if ctx.user_id:
         user = await db.get(User, ctx.user_id)
         if not user:
             raise ValueError(f"User not found: {ctx.user_id}")
     else:
-        user = await db.scalar(
+        user = await get_or_create_runtime_row(
+            db,
             select(User).where(
                 User.organization_id == org.id,
                 User.email == settings.bootstrap_user_email,
-            )
-        )
-        if not user:
-            user = User(
+            ),
+            lambda: User(
                 organization_id=org.id,
                 email=settings.bootstrap_user_email,
                 display_name="Local User",
                 role="owner",
-            )
-            db.add(user)
-            await db.flush()
+            ),
+        )
 
-    project = await db.scalar(
+    project = await get_or_create_runtime_row(
+        db,
         select(Project).where(
             Project.organization_id == org.id,
             Project.slug == settings.bootstrap_project_slug,
-        )
-    )
-    if not project:
-        project = Project(
+        ),
+        lambda: Project(
             organization_id=org.id,
             name="Default Project",
             slug=settings.bootstrap_project_slug,
-        )
-        db.add(project)
-        await db.flush()
+        ),
+    )
 
-    workspace = await db.scalar(
+    workspace = await get_or_create_runtime_row(
+        db,
         select(Workspace).where(
             Workspace.organization_id == org.id,
             Workspace.project_id == project.id,
             Workspace.name == settings.bootstrap_workspace_name,
-        )
-    )
-    if not workspace:
-        workspace = Workspace(
+        ),
+        lambda: Workspace(
             organization_id=org.id,
             project_id=project.id,
             name=settings.bootstrap_workspace_name,
             root_path=str(settings.workspace_root),
-        )
-        db.add(workspace)
-        await db.flush()
+        ),
+    )
 
     return RuntimeTenant(
         organization_id=org.id,
@@ -91,4 +84,29 @@ async def ensure_runtime_tenant(db: AsyncSession, ctx: TenantContext) -> Runtime
         workspace_id=workspace.id,
         user_id=user.id,
     )
+
+
+async def get_or_create_runtime_row[T](
+    db: AsyncSession,
+    statement,
+    factory,
+) -> T:
+    row = await db.scalar(statement)
+    if row:
+        return row
+
+    row = factory()
+    savepoint = await db.begin_nested()
+    try:
+        db.add(row)
+        await db.flush()
+    except IntegrityError:
+        await savepoint.rollback()
+        row = await db.scalar(statement)
+        if row is None:
+            raise
+        return row
+    else:
+        await savepoint.commit()
+        return row
 

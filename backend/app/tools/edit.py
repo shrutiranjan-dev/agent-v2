@@ -7,6 +7,7 @@ from backend.app.tools.base import (
     BaseTool,
     ToolContext,
     ToolResult,
+    content_sha256,
     ensure_inside_workspace,
     file_sha256,
     resolve_workspace_path,
@@ -59,12 +60,17 @@ class EditFileTool(BaseTool):
             raise IsADirectoryError(f"Path is a directory, not a file: {target}")
 
         before = target.read_text(encoding="utf-8")
-        before_hash = file_sha256(target)
+        before_hash = content_sha256(before)
+        before_file_hash = file_sha256(target)
         if input_data.expected_existing_hash and before_hash != input_data.expected_existing_hash:
             return ToolResult.failure(
                 code="stale_file_hash",
                 message="Refusing to edit because expected_existing_hash does not match current file.",
-                detail={"expected": input_data.expected_existing_hash, "actual": before_hash},
+                detail={
+                    "expected": input_data.expected_existing_hash,
+                    "actual": before_hash,
+                    "actual_file_sha256": before_file_hash,
+                },
                 recoverable=True,
                 metadata={"path": input_data.path, "resolved_path": str(target)},
             )
@@ -117,7 +123,7 @@ class EditFileTool(BaseTool):
         after_hash = None
         if not input_data.dry_run:
             atomic_write_text(target, after)
-            after_hash = file_sha256(target)
+            after_hash = content_sha256(after)
         return ToolResult(
             title=str(target),
             output={

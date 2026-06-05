@@ -45,7 +45,14 @@ class FakeAsyncSession:
         return self.scalar_value
 
     async def scalars(self, _statement: Any) -> FakeScalarResult:
-        return FakeScalarResult(self.messages)
+        entity = None
+        descriptions = getattr(_statement, "column_descriptions", None)
+        if descriptions:
+            entity = descriptions[0].get("entity")
+        if entity is None:
+            return FakeScalarResult(self.messages)
+        rows = [row for (model, _row_id), row in self.objects.items() if model is entity]
+        return FakeScalarResult(rows)
 
     async def get(self, model: type, row_id: Any) -> Any:
         return self.objects.get((model, row_id))

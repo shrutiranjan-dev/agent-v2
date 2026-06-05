@@ -33,14 +33,15 @@ def atomic_write_text(path: Path, content: str) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(tmp_name, path)
-        try:
-            dir_fd = os.open(str(path.parent), os.O_DIRECTORY)
+        if hasattr(os, "O_DIRECTORY"):
             try:
-                os.fsync(dir_fd)
-            finally:
-                os.close(dir_fd)
-        except OSError:
-            pass
+                dir_fd = os.open(str(path.parent), os.O_DIRECTORY)
+                try:
+                    os.fsync(dir_fd)
+                finally:
+                    os.close(dir_fd)
+            except OSError:
+                pass
     except Exception:
         try:
             os.unlink(tmp_name)

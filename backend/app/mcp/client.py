@@ -240,13 +240,23 @@ class McpClient:
         settings = get_settings()
         if not server.command:
             raise RuntimeError("stdio MCP server is missing command.")
-        command = self._resolve_command(server.command)
-        command_name = Path(command).name
+        raw_command = server.command
+        command_name = Path(raw_command).name
         allowed = set(settings.mcp.allowed_stdio_commands)
+        looks_like_path = Path(raw_command).is_absolute() or any(sep in raw_command for sep in ("/", "\\"))
         if (
             not server.trusted
             and not settings.mcp.allow_untrusted_stdio
-            and server.command not in allowed
+            and looks_like_path
+            and raw_command not in allowed
+            and command_name not in allowed
+        ):
+            raise PermissionError(f"Untrusted stdio MCP command is not allowed: {command_name}")
+        command = self._resolve_command(raw_command)
+        if (
+            not server.trusted
+            and not settings.mcp.allow_untrusted_stdio
+            and raw_command not in allowed
             and command_name not in allowed
             and command not in allowed
         ):
