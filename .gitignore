@@ -45,6 +45,9 @@ ollama-data/
 
 # OS/editor
 .DS_Store
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
 .idea/
 .vscode/
 *.swp

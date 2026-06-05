@@ -17,7 +17,7 @@ This project is not affiliated with OpenCode and does not reuse OpenCode brandin
 
 ```bash
 cp .env.example .env
-docker compose up --build
+docker compose up -d --build
 scripts/migrate.sh
 scripts/pull-ollama-models.sh
 ```
@@ -25,6 +25,83 @@ scripts/pull-ollama-models.sh
 Backend: http://localhost:8000
 
 Frontend: http://localhost:5173
+
+## Windows Setup
+
+The repository is intended to be portable between Linux and Windows. Shell scripts stay in `scripts/*.sh` for Linux, WSL, Git Bash, and CI. On Windows PowerShell, use the equivalent commands below.
+
+Install prerequisites:
+
+- Docker Desktop for Windows with the Linux container engine enabled
+- Git for Windows
+- Python 3.12
+- Node.js 20 or newer
+- Ollama for Windows
+
+Clone and configure:
+
+```powershell
+git clone git@github.com:shrutiranjan-dev/agent-v2.git
+cd agent-v2
+Copy-Item .env.example .env
+```
+
+Pull local Ollama models from PowerShell:
+
+```powershell
+ollama pull qwen2.5-coder:7b
+ollama pull qwen2.5-coder:14b
+ollama pull llama3.1:8b
+```
+
+Start the Docker services from PowerShell:
+
+```powershell
+docker compose up -d --build
+```
+
+Run migrations from PowerShell:
+
+```powershell
+docker compose run --rm backend alembic -c backend/alembic.ini upgrade head
+```
+
+Run backend checks locally from PowerShell:
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -e ".[test]"
+pytest backend/tests
+```
+
+Run frontend checks locally from PowerShell:
+
+```powershell
+cd frontend
+npm install
+npm run build
+```
+
+Optional smoke checks from PowerShell can run through Git Bash or WSL. If you run them from a shell that supports Bash, set the Docker PostgreSQL URL first:
+
+```powershell
+$env:AP_TEST_POSTGRES_URL="postgresql+psycopg://agent:agent@localhost:15432/agent_platform"
+```
+
+Then use Git Bash or WSL:
+
+```bash
+scripts/runtime-smoke.sh
+scripts/codeintel-smoke.sh
+scripts/real-mcp-smoke.sh
+```
+
+Windows notes:
+
+- Keep your real `.env` local. It is ignored by Git.
+- Docker Desktop exposes host Ollama to containers through `host.docker.internal`, which is already the default `AP_OLLAMA_BASE_URL`.
+- `.gitattributes` keeps shell scripts with LF endings and PowerShell scripts with CRLF endings.
 
 ## Developer Commands
 
@@ -49,6 +126,36 @@ Frontend checks:
 cd frontend
 npm install
 npm run build
+```
+
+## Docker Services
+
+Default Docker Compose services:
+
+- `backend`: FastAPI API and WebSocket server
+- `backend-worker`: queue-backed agent/permission/human-input worker
+- `frontend`: React/Vite dashboard
+- `postgres`: PostgreSQL with pgvector
+- `redis`: queue, locks, and pub/sub coordination
+- `qdrant`: semantic memory backend
+- `neo4j`: graph memory backend
+- `minio`: artifact/object storage
+- `clickhouse`: analytics/event observability
+
+Optional profile:
+
+- `ollama`: Docker Ollama service, disabled by default. The normal setup uses host Ollama at `http://host.docker.internal:11434`.
+
+Start all default services:
+
+```bash
+docker compose up -d --build
+```
+
+Stop services:
+
+```bash
+docker compose down
 ```
 
 ## Architecture Notes
