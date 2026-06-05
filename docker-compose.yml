@@ -1,0 +1,208 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    environment:
+      AP_DATABASE_URL: postgresql+asyncpg://agent:agent@postgres:5432/agent_platform
+      AP_REDIS_URL: redis://redis:6379/0
+      AP_QUEUE_ENABLED: ${AP_QUEUE_ENABLED:-true}
+      AP_QUEUE_VISIBILITY_TIMEOUT_SECONDS: ${AP_QUEUE_VISIBILITY_TIMEOUT_SECONDS:-300}
+      AP_ENABLE_TEST_ENDPOINTS: ${AP_ENABLE_TEST_ENDPOINTS:-false}
+      AP_REDIS_PUBSUB_ENABLED: ${AP_REDIS_PUBSUB_ENABLED:-true}
+      AP_QDRANT_URL: http://qdrant:6333
+      AP_NEO4J_URI: bolt://neo4j:7687
+      AP_MINIO_ENDPOINT: minio:9000
+      AP_CLICKHOUSE_HOST: clickhouse
+      AP_OLLAMA_BASE_URL: ${AP_OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      AP_WORKSPACE_ROOT: /workspace
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - .:/workspace
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    ports:
+      - "${BACKEND_HOST_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backend-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    command: ["python", "-m", "backend.app.queue.worker"]
+    environment:
+      AP_DATABASE_URL: postgresql+asyncpg://agent:agent@postgres:5432/agent_platform
+      AP_REDIS_URL: redis://redis:6379/0
+      AP_QUEUE_ENABLED: ${AP_QUEUE_ENABLED:-true}
+      AP_QUEUE_VISIBILITY_TIMEOUT_SECONDS: ${AP_QUEUE_VISIBILITY_TIMEOUT_SECONDS:-300}
+      AP_ENABLE_TEST_ENDPOINTS: ${AP_ENABLE_TEST_ENDPOINTS:-false}
+      AP_REDIS_PUBSUB_ENABLED: ${AP_REDIS_PUBSUB_ENABLED:-true}
+      AP_QDRANT_URL: http://qdrant:6333
+      AP_NEO4J_URI: bolt://neo4j:7687
+      AP_MINIO_ENDPOINT: minio:9000
+      AP_CLICKHOUSE_HOST: clickhouse
+      AP_OLLAMA_BASE_URL: ${AP_OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      AP_WORKSPACE_ROOT: /workspace
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - .:/workspace
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import backend.app.queue.worker"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    environment:
+      VITE_API_BASE_URL: http://localhost:8000
+      VITE_WS_BASE_URL: ws://localhost:8000
+    ports:
+      - "${FRONTEND_HOST_PORT:-5173}:5173"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5173"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-agent_platform}
+      POSTGRES_USER: ${POSTGRES_USER:-agent}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agent}
+    ports:
+      - "${POSTGRES_HOST_PORT:-15432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "${REDIS_HOST_PORT:-16379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  qdrant:
+    image: qdrant/qdrant:v1.11.5
+    ports:
+      - "${QDRANT_HTTP_HOST_PORT:-16333}:6333"
+      - "${QDRANT_GRPC_HOST_PORT:-16334}:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 2 bash -c ': > /dev/tcp/127.0.0.1/6333'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  neo4j:
+    image: neo4j:5.23-community
+    hostname: neo4j
+    environment:
+      NEO4J_AUTH: ${NEO4J_AUTH:-neo4j/agent-platform}
+    ports:
+      - "${NEO4J_HTTP_HOST_PORT:-17474}:7474"
+      - "${NEO4J_BOLT_HOST_PORT:-17687}:7687"
+    volumes:
+      - neo4j_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+
+  minio:
+    image: minio/minio:RELEASE.2024-08-17T01-24-54Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "${MINIO_API_HOST_PORT:-19000}:9000"
+      - "${MINIO_CONSOLE_HOST_PORT:-19001}:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    ports:
+      - "${CLICKHOUSE_HTTP_HOST_PORT:-18123}:8123"
+      - "${CLICKHOUSE_NATIVE_HOST_PORT:-19009}:9000"
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  ollama:
+    profiles:
+      - docker-ollama
+    image: ollama/ollama:0.3.12
+    ports:
+      - "${OLLAMA_HOST_PORT:-11435}:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  postgres_data:
+  qdrant_data:
+  neo4j_data:
+  minio_data:
+  clickhouse_data:
+  ollama_data:

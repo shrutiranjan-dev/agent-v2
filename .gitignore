@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+.coverage
+htmlcov/
+
+# Node/frontend
+node_modules/
+frontend/node_modules/
+dist/
+build/
+coverage/
+.next/
+*.tsbuildinfo
+
+# Logs
+*.log
+logs/
+
+# Runtime/artifacts
+artifacts/
+qa-artifacts/
+tmp/
+.tmp/
+uploads/
+downloads/
+
+# Docker/local volumes
+postgres-data/
+redis-data/
+qdrant-data/
+neo4j-data/
+minio-data/
+clickhouse-data/
+ollama-data/
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# External cloned source
+external/opencode-source/.git/
