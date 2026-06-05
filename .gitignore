@@ -43,11 +43,14 @@ minio-data/
 clickhouse-data/
 ollama-data/
 
-# OS/editor
-.DS_Store
+# Windows
 Thumbs.db
 Desktop.ini
 $RECYCLE.BIN/
+*.lnk
+
+# OS/editor
+.DS_Store
 .idea/
 .vscode/
 *.swp
