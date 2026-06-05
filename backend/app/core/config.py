@@ -62,6 +62,16 @@ class CodeIntelConfig(BaseModel):
     context_diagnostic_limit: int = Field(default=8, ge=1)
 
 
+class LspConfig(BaseModel):
+    enabled: bool = False
+    python_command: str = "pylsp"
+    startup_timeout_seconds: int = Field(default=10, ge=1)
+    request_timeout_seconds: int = Field(default=10, ge=1)
+    shutdown_timeout_seconds: int = Field(default=5, ge=1)
+    max_response_chars: int = Field(default=200_000, ge=1000)
+    workspace_root: Path = Path("/workspace")
+
+
 class McpConfig(BaseModel):
     enabled: bool = True
     connect_timeout_seconds: int = Field(default=10, ge=1)
@@ -152,6 +162,7 @@ class Settings(BaseSettings):
     qdrant: QdrantConfig = Field(default_factory=QdrantConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     codeintel: CodeIntelConfig = Field(default_factory=CodeIntelConfig)
+    lsp: LspConfig = Field(default_factory=LspConfig)
     mcp: McpConfig = Field(default_factory=McpConfig)
     plugins: PluginConfig = Field(default_factory=PluginConfig)
     neo4j: Neo4jConfig = Field(default_factory=Neo4jConfig)
@@ -232,8 +243,31 @@ class Settings(BaseSettings):
     codeintel_enabled_override: bool | None = Field(
         default=None, validation_alias=AliasChoices("AP_CODEINTEL_ENABLED", "CODEINTEL_ENABLED")
     )
-    codeintel_lsp_enabled_override: bool | None = Field(
-        default=None, validation_alias=AliasChoices("AP_CODEINTEL_LSP_ENABLED", "CODEINTEL_LSP_ENABLED")
+    lsp_enabled_override: bool | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AP_LSP_ENABLED", "LSP_ENABLED", "AP_CODEINTEL_LSP_ENABLED", "CODEINTEL_LSP_ENABLED"),
+    )
+    lsp_python_command_override: str | None = Field(
+        default=None, validation_alias=AliasChoices("AP_LSP_PYTHON_COMMAND", "LSP_PYTHON_COMMAND")
+    )
+    lsp_startup_timeout_seconds_override: int | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AP_LSP_STARTUP_TIMEOUT_SECONDS", "LSP_STARTUP_TIMEOUT_SECONDS"),
+    )
+    lsp_request_timeout_seconds_override: int | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AP_LSP_REQUEST_TIMEOUT_SECONDS", "LSP_REQUEST_TIMEOUT_SECONDS"),
+    )
+    lsp_shutdown_timeout_seconds_override: int | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AP_LSP_SHUTDOWN_TIMEOUT_SECONDS", "LSP_SHUTDOWN_TIMEOUT_SECONDS"),
+    )
+    lsp_max_response_chars_override: int | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AP_LSP_MAX_RESPONSE_CHARS", "LSP_MAX_RESPONSE_CHARS"),
+    )
+    lsp_workspace_root_override: Path | None = Field(
+        default=None, validation_alias=AliasChoices("AP_LSP_WORKSPACE_ROOT", "LSP_WORKSPACE_ROOT")
     )
     codeintel_max_file_bytes_override: int | None = Field(
         default=None, validation_alias=AliasChoices("AP_CODEINTEL_MAX_FILE_BYTES", "CODEINTEL_MAX_FILE_BYTES")
@@ -449,8 +483,21 @@ class Settings(BaseSettings):
             self.memory.compaction_min_excluded_messages = self.memory_compaction_min_excluded_messages_override
         if self.codeintel_enabled_override is not None:
             self.codeintel.enabled = self.codeintel_enabled_override
-        if self.codeintel_lsp_enabled_override is not None:
-            self.codeintel.lsp_enabled = self.codeintel_lsp_enabled_override
+        if self.lsp_enabled_override is not None:
+            self.lsp.enabled = self.lsp_enabled_override
+            self.codeintel.lsp_enabled = self.lsp_enabled_override
+        if self.lsp_python_command_override:
+            self.lsp.python_command = self.lsp_python_command_override
+        if self.lsp_startup_timeout_seconds_override is not None:
+            self.lsp.startup_timeout_seconds = self.lsp_startup_timeout_seconds_override
+        if self.lsp_request_timeout_seconds_override is not None:
+            self.lsp.request_timeout_seconds = self.lsp_request_timeout_seconds_override
+        if self.lsp_shutdown_timeout_seconds_override is not None:
+            self.lsp.shutdown_timeout_seconds = self.lsp_shutdown_timeout_seconds_override
+        if self.lsp_max_response_chars_override is not None:
+            self.lsp.max_response_chars = self.lsp_max_response_chars_override
+        if self.lsp_workspace_root_override is not None:
+            self.lsp.workspace_root = self.lsp_workspace_root_override
         if self.codeintel_max_file_bytes_override is not None:
             self.codeintel.max_file_bytes = self.codeintel_max_file_bytes_override
         if self.codeintel_max_files_override is not None:

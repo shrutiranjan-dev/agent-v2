@@ -1156,3 +1156,42 @@
 - Persistent MCP session pooling is intentionally not implemented yet; Batch 1 uses short-lived sessions for safer cleanup.
 - MCP OAuth/auth flows and server credential encryption are future work.
 - Distributed registry refresh is still opportunistic through `/tools` sync rather than pushed across every API process.
+
+# Real LSP JSON-RPC Lifecycle Batch 1 Implementation Result
+
+## Config and source control status
+
+- Added a dedicated `lsp` config block in `backend/app/core/config.py` with explicit env vars for enablement, command, startup/request/shutdown timeouts, response-size limits, and workspace root.
+- Added matching defaults to `.env.example`.
+- Tightened `.gitignore` so runtime-only top-level `artifacts/`, `tmp/`, `uploads/`, and `downloads/` stay ignored without hiding the tracked source package at `backend/app/artifacts/`.
+- Expanded `.gitattributes` so common Python, TypeScript, JSON, YAML, Markdown, and shell files keep stable cross-platform line endings.
+
+## LSP client status
+
+- Replaced the previous placeholder/static-only adapter with a real stdio JSON-RPC client in `backend/app/codeintel/lsp_client.py`.
+- The client now performs framed request/response handling, initialize/shutdown lifecycle, `didOpen`, `documentSymbol`, `definition`, `references`, and `publishDiagnostics` handling with timeout and response-size guards.
+- Workspace and file access remain rooted to the configured LSP workspace; outside-root paths are rejected instead of being normalized silently.
+
+## Fallback behavior status
+
+- Added `backend/app/codeintel/lsp_service.py` as the honest orchestration layer between the real client and the existing indexed database fallback.
+- `/health/codeintel` now reports the active mode as `real_lsp`, `static_fallback`, or `failed` with the last error reason instead of overclaiming semantic support.
+- File-based symbol/definition/reference/diagnostic requests use real LSP when enabled and healthy, and fall back to the indexed database when real LSP is disabled or fails.
+
+## Windows and host-test runtime status
+
+- Host-side `pytest backend/tests` no longer breaks just because `.env` points Redis at the Docker service hostname `redis`.
+- `backend/app/runtime/event_bus.py`, `backend/app/queue/jobs.py`, and `backend/app/queue/redis_client.py` now degrade safely to in-process delivery and buffering when Redis transport is unavailable from the host process, while preserving Redis-backed behavior inside Docker.
+- This keeps Windows unit tests and local host runs fast without pretending Redis is healthy.
+
+## Smoke and validation status
+
+- Added `scripts/lsp-smoke.sh` alongside `scripts/codeintel-smoke.sh`.
+- `scripts/lsp-smoke.sh` reports the active LSP mode honestly, validates symbol/diagnostic/definition paths, and can be made strict with `STRICT_REAL_LSP=1`.
+- Focused validation now includes compile, ruff, the rewritten codeintel tests, and host-side runtime tests that previously failed on Redis hostname resolution.
+
+## Remaining gaps
+
+- Batch 1 still uses one LSP process at a time rather than a pooled or per-workspace supervisor.
+- There is no HTTP/SSE LSP transport in this batch; the implementation is stdio-only.
+- Live real-LSP smoke depends on starting the backend with `AP_LSP_ENABLED=true` and a valid `AP_LSP_PYTHON_COMMAND` such as `pylsp`.

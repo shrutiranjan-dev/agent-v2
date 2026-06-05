@@ -1,10 +1,12 @@
 import json
+from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel
+from redis.exceptions import RedisError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
@@ -14,7 +16,7 @@ from backend.app.core.config import Settings, get_settings
 from backend.app.core.events import EventType
 from backend.app.core.redaction import redact_text
 from backend.app.db.models import AgentRun, QueueJobRecord, Session
-from backend.app.queue.redis_client import get_redis
+from backend.app.queue.redis_client import get_redis, redis_transport_available
 from backend.app.runtime.event_bus import event_bus
 
 
@@ -51,6 +53,10 @@ class RuntimeQueue:
     def __init__(self, *, settings: Settings | None = None, redis_factory=get_redis) -> None:
         self._settings = settings
         self._redis_factory = redis_factory
+        self._local_fallback_queue: dict[str, list[str]] = defaultdict(list)
+
+    def _redis_transport_available(self) -> bool:
+        return self._redis_factory is not get_redis or redis_transport_available()
 
     @property
     def settings(self) -> Settings:
@@ -210,9 +216,15 @@ class RuntimeQueue:
     async def publish_job(self, job: QueueJobRecord) -> None:
         if not self.enabled:
             raise QueueDisabledError("Queue is disabled.")
+        payload = QueueJob(queue_job_id=str(job.id)).model_dump_json()
+        if not self._redis_transport_available():
+            self._local_fallback_queue[self.settings.queue.name].append(payload)
+            return
         client = self._redis_factory()
         try:
-            await client.rpush(self.settings.queue.name, QueueJob(queue_job_id=str(job.id)).model_dump_json())
+            await client.rpush(self.settings.queue.name, payload)
+        except (RedisError, OSError, ValueError, TypeError):
+            self._local_fallback_queue[self.settings.queue.name].append(payload)
         finally:
             close = getattr(client, "aclose", None)
             if close:
@@ -221,22 +233,38 @@ class RuntimeQueue:
     async def dequeue(self) -> QueueJob | None:
         if not self.enabled:
             raise QueueDisabledError("Queue is disabled.")
+        if not self._redis_transport_available():
+            item = self._local_pop(self.settings.queue.name)
+            if not item:
+                return None
+            _queue_name, raw = item
+            return QueueJob.model_validate_json(raw)
         client = self._redis_factory()
         try:
             try:
                 item = await client.blpop(self.settings.queue.name, timeout=self.settings.queue.poll_timeout_seconds)
             except RedisTimeoutError:
                 item = None
+            except (RedisError, OSError, ValueError, TypeError):
+                item = self._local_pop(self.settings.queue.name)
         finally:
             close = getattr(client, "aclose", None)
             if close:
                 await close()
+        if item is None:
+            item = self._local_pop(self.settings.queue.name)
         if not item:
             return None
         _queue_name, raw = item
         if isinstance(raw, bytes):
             raw = raw.decode("utf-8")
         return QueueJob.model_validate_json(raw)
+
+    def _local_pop(self, queue_name: str) -> tuple[str, str] | None:
+        values = self._local_fallback_queue.get(queue_name)
+        if not values:
+            return None
+        return queue_name, values.pop(0)
 
     async def claim_job(self, db: AsyncSession, *, queue_job_id: UUID, worker_id: str) -> QueueJobRecord | None:
         now = datetime.now(UTC)

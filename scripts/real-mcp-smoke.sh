@@ -3,7 +3,7 @@ set -euo pipefail
 
 BACKEND_URL="${BACKEND_URL:-${AP_BACKEND_URL:-http://localhost:8000}}"
 SKIP_REAL_MCP_IF_SDK_MISSING="${SKIP_REAL_MCP_IF_SDK_MISSING:-0}"
-SKIP_RUNTIME_EXECUTE_IF_TEST_ENDPOINT_DISABLED="${SKIP_RUNTIME_EXECUTE_IF_TEST_ENDPOINT_DISABLED:-0}"
+SKIP_RUNTIME_EXECUTE_IF_TEST_ENDPOINT_DISABLED="${SKIP_RUNTIME_EXECUTE_IF_TEST_ENDPOINT_DISABLED:-1}"
 PYTHON_BIN="python3"
 
 if [[ -x ".venv/Scripts/python.exe" ]]; then
@@ -101,7 +101,7 @@ def main() -> None:
             {"tool_name": enabled["full_name"], "input": {"text": "hello"}},
         )
     except RuntimeError as exc:
-        if "HTTP 404" in str(exc) and skip_test_endpoint:
+        if "HTTP 404" in str(exc) and ("test execution endpoint is disabled" in str(exc).lower() or skip_test_endpoint):
             print("MCP_RUNTIME_EXECUTION=skipped_test_endpoint_disabled")
         else:
             raise

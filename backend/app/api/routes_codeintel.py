@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.codeintel.indexer import CodeIndexRequest, workspace_indexer
-from backend.app.codeintel.lsp_client import lsp_client
+from backend.app.codeintel.lsp_service import lsp_service
 from backend.app.codeintel.repository import codeintel_repository, serialize_code_file
 from backend.app.core.config import get_settings
 from backend.app.core.security import TenantContext, tenant_context
@@ -88,15 +88,26 @@ async def list_code_symbols(
     tenant: TenantContext = Depends(tenant_context),
 ) -> dict[str, Any]:
     runtime_tenant = await ensure_runtime_tenant(db, tenant)
-    rows = await codeintel_repository.find_symbols(
-        db,
-        workspace_id=runtime_tenant.workspace_id,
-        query=query,
-        file_path=file,
-        kind=kind,
-        language=language,
-        limit=limit,
-    )
+    if file:
+        rows = await lsp_service.document_symbols(
+            db,
+            workspace_id=runtime_tenant.workspace_id,
+            file_path=file,
+            query=query,
+            kind=kind,
+            language=language,
+            limit=limit,
+        )
+    else:
+        rows = await codeintel_repository.find_symbols(
+            db,
+            workspace_id=runtime_tenant.workspace_id,
+            query=query,
+            file_path=file,
+            kind=kind,
+            language=language,
+            limit=limit,
+        )
     return {"symbols": rows}
 
 
@@ -112,7 +123,7 @@ async def code_definition(
     runtime_tenant = await ensure_runtime_tenant(db, tenant)
     if not name and not (file and line):
         raise HTTPException(status_code=422, detail="Provide either name or file+line.")
-    definition = await lsp_client.goto_definition(
+    definition = await lsp_service.goto_definition(
         db,
         workspace_id=runtime_tenant.workspace_id,
         name=name,
@@ -120,28 +131,34 @@ async def code_definition(
         line=line,
         column=column,
     )
-    return {"definition": definition, "lsp": lsp_client.status()}
+    return {"definition": definition, "lsp": lsp_service.status()}
 
 
 @router.get("/code/references")
 async def code_references(
     name: str | None = None,
     symbol_id: UUID | None = None,
+    file: str | None = None,
+    line: int | None = Query(default=None, ge=1),
+    column: int | None = Query(default=None, ge=0),
     limit: int = Query(default=100, ge=1, le=1000),
     db: AsyncSession = Depends(get_session),
     tenant: TenantContext = Depends(tenant_context),
 ) -> dict[str, Any]:
     runtime_tenant = await ensure_runtime_tenant(db, tenant)
-    if not name and not symbol_id:
-        raise HTTPException(status_code=422, detail="Provide name or symbol_id.")
-    references = await lsp_client.find_references(
+    if not name and not symbol_id and not (file and line):
+        raise HTTPException(status_code=422, detail="Provide name, symbol_id, or file+line.")
+    references = await lsp_service.find_references(
         db,
         workspace_id=runtime_tenant.workspace_id,
         name=name,
         symbol_id=symbol_id,
+        file=file,
+        line=line,
+        column=column,
         limit=limit,
     )
-    return {"references": references, "lsp": lsp_client.status()}
+    return {"references": references, "lsp": lsp_service.status()}
 
 
 @router.get("/code/diagnostics")
@@ -153,10 +170,10 @@ async def code_diagnostics(
     tenant: TenantContext = Depends(tenant_context),
 ) -> dict[str, Any]:
     runtime_tenant = await ensure_runtime_tenant(db, tenant)
-    diagnostics = await lsp_client.get_diagnostics(
+    diagnostics = await lsp_service.get_diagnostics(
         db,
         workspace_id=runtime_tenant.workspace_id,
-        file=file,
+        file_path=file,
         severity=severity,
         limit=limit,
     )
@@ -184,7 +201,7 @@ async def code_map(
 @router.get("/health/codeintel")
 async def codeintel_health() -> dict[str, Any]:
     settings = get_settings()
-    status = lsp_client.status()
+    status = await lsp_service.health()
     return {
         "status": "ok" if settings.codeintel.enabled else "disabled",
         "indexing_enabled": settings.codeintel.enabled,

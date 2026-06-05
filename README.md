@@ -94,6 +94,7 @@ Then use Git Bash or WSL:
 ```bash
 scripts/runtime-smoke.sh
 scripts/codeintel-smoke.sh
+scripts/lsp-smoke.sh
 scripts/real-mcp-smoke.sh
 ```
 
@@ -102,6 +103,37 @@ Windows notes:
 - Keep your real `.env` local. It is ignored by Git.
 - Docker Desktop exposes host Ollama to containers through `host.docker.internal`, which is already the default `AP_OLLAMA_BASE_URL`.
 - `.gitattributes` keeps shell scripts with LF endings and PowerShell scripts with CRLF endings.
+- Host-side backend tests now degrade cleanly when `.env` points Redis at the Docker service hostname `redis`; plain `pytest backend/tests` no longer requires a separate Redis override just to run unit tests on Windows.
+
+## Code Intelligence And LSP
+
+Static code indexing is always available when code intelligence is enabled. Real LSP is optional and intentionally honest about its state.
+
+Environment variables:
+
+```bash
+AP_LSP_ENABLED=false
+AP_LSP_PYTHON_COMMAND=pylsp
+AP_LSP_STARTUP_TIMEOUT_SECONDS=10
+AP_LSP_REQUEST_TIMEOUT_SECONDS=10
+AP_LSP_SHUTDOWN_TIMEOUT_SECONDS=5
+AP_LSP_MAX_RESPONSE_CHARS=200000
+AP_LSP_WORKSPACE_ROOT=/workspace
+```
+
+Behavior:
+
+- When `AP_LSP_ENABLED=false`, `/health/codeintel` reports `static_fallback` and the API/tools use the indexed database fallback.
+- When `AP_LSP_ENABLED=true`, the backend starts a real stdio JSON-RPC language server and uses it for file-based symbols, definitions, references, and diagnostics when the server is available.
+- If the configured server is missing, times out, or fails, health reports the failure and static fallback remains available instead of pretending LSP succeeded.
+
+Smoke options:
+
+```bash
+scripts/codeintel-smoke.sh
+scripts/lsp-smoke.sh
+STRICT_REAL_LSP=1 scripts/lsp-smoke.sh
+```
 
 ## Developer Commands
 

@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 from backend.app.codeintel.diagnostics import diagnostics_service
 from backend.app.codeintel.indexer import CodeIndexRequest, workspace_indexer
-from backend.app.codeintel.lsp_client import lsp_client
+from backend.app.codeintel.lsp_service import lsp_service
 from backend.app.codeintel.repository import codeintel_repository
 from backend.app.tools.base import BaseTool, ToolContext, ToolResult
 
@@ -37,6 +37,9 @@ class CodeDefinitionInput(BaseModel):
 class CodeReferencesInput(BaseModel):
     name: str | None = None
     symbol_id: UUID | None = None
+    file: str | None = None
+    line: int | None = Field(default=None, ge=1)
+    column: int | None = Field(default=None, ge=0)
     limit: int = Field(default=100, ge=1, le=1000)
 
 
@@ -111,15 +114,26 @@ class CodeSymbolsTool(CodeIntelTool):
     examples = [{"query": "AgentRunner", "limit": 20}, {"file": "backend/app/main.py"}]
 
     async def run(self, input_data: CodeSymbolsInput, ctx: ToolContext) -> ToolResult:
-        symbols = await codeintel_repository.find_symbols(
-            self._db(ctx),
-            workspace_id=ctx.workspace_id,
-            query=input_data.query,
-            file_path=input_data.file,
-            kind=input_data.kind,
-            language=input_data.language,
-            limit=input_data.limit,
-        )
+        if input_data.file:
+            symbols = await lsp_service.document_symbols(
+                self._db(ctx),
+                workspace_id=ctx.workspace_id,
+                file_path=input_data.file,
+                query=input_data.query,
+                kind=input_data.kind,
+                language=input_data.language,
+                limit=input_data.limit,
+            )
+        else:
+            symbols = await codeintel_repository.find_symbols(
+                self._db(ctx),
+                workspace_id=ctx.workspace_id,
+                query=input_data.query,
+                file_path=input_data.file,
+                kind=input_data.kind,
+                language=input_data.language,
+                limit=input_data.limit,
+            )
         return ToolResult(
             title=f"{len(symbols)} symbol(s)",
             output={"symbols": symbols, "count": len(symbols)},
@@ -142,7 +156,7 @@ class CodeDefinitionTool(CodeIntelTool):
                 message="Provide either name or file+line.",
                 recoverable=True,
             )
-        definition = await lsp_client.goto_definition(
+        definition = await lsp_service.goto_definition(
             self._db(ctx),
             workspace_id=ctx.workspace_id,
             name=input_data.name,
@@ -153,7 +167,7 @@ class CodeDefinitionTool(CodeIntelTool):
         return ToolResult(
             title="Definition found" if definition else "Definition not found",
             output={"definition": definition},
-            metadata={"found": definition is not None, "lsp_status": lsp_client.status()},
+            metadata={"found": definition is not None, "lsp_status": lsp_service.status()},
         )
 
 
@@ -166,23 +180,26 @@ class CodeReferencesTool(CodeIntelTool):
     examples = [{"name": "AgentRunner"}, {"symbol_id": "00000000-0000-0000-0000-000000000000"}]
 
     async def run(self, input_data: CodeReferencesInput, ctx: ToolContext) -> ToolResult:
-        if not input_data.name and not input_data.symbol_id:
+        if not input_data.name and not input_data.symbol_id and not (input_data.file and input_data.line):
             return ToolResult.failure(
                 code="missing_reference_target",
-                message="Provide name or symbol_id.",
+                message="Provide name, symbol_id, or file+line.",
                 recoverable=True,
             )
-        references = await lsp_client.find_references(
+        references = await lsp_service.find_references(
             self._db(ctx),
             workspace_id=ctx.workspace_id,
             name=input_data.name,
             symbol_id=input_data.symbol_id,
+            file=input_data.file,
+            line=input_data.line,
+            column=input_data.column,
             limit=input_data.limit,
         )
         return ToolResult(
             title=f"{len(references)} reference(s)",
             output={"references": references, "count": len(references)},
-            metadata={"count": len(references), "lsp_status": lsp_client.status()},
+            metadata={"count": len(references), "lsp_status": lsp_service.status()},
         )
 
 
@@ -195,7 +212,7 @@ class CodeDiagnosticsTool(CodeIntelTool):
     examples = [{"severity": "error", "limit": 25}, {"file": "backend/app/main.py"}]
 
     async def run(self, input_data: CodeDiagnosticsInput, ctx: ToolContext) -> ToolResult:
-        diagnostics = await lsp_client.get_diagnostics(
+        diagnostics = await lsp_service.get_diagnostics(
             self._db(ctx),
             workspace_id=ctx.workspace_id,
             file_path=input_data.file,

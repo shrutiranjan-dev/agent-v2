@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import asyncio
+import sys
 from datetime import UTC, datetime
+from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -10,7 +13,12 @@ from backend.app.agents.registry import agent_registry
 from backend.app.codeintel.diagnostics import diagnostics_service, parse_ruff_output
 from backend.app.codeintel.indexer import CodeIndexRequest, WorkspaceIndexer
 from backend.app.codeintel.language import detect_language
-from backend.app.codeintel.lsp_client import lsp_client
+from backend.app.codeintel.lsp_client import (
+    encode_jsonrpc_message,
+    lsp_client,
+    read_jsonrpc_message,
+)
+from backend.app.codeintel.lsp_service import lsp_service
 from backend.app.codeintel.parser import parse_code
 from backend.app.codeintel.repository import codeintel_repository
 from backend.app.db.models import CodeDiagnostic, CodeFile, CodeReference, CodeSymbol
@@ -21,6 +29,52 @@ from backend.app.tools.codeintel import CodeDefinitionTool, CodeSymbolsTool
 from backend.app.tools.registry import tool_registry
 from backend.tests.fakes import FakeAsyncSession
 from backend.tests.test_agent_runner_runtime import make_session, make_user_message
+
+FAKE_LSP_SERVER = Path(__file__).parent / "fixtures" / "fake_lsp_server.py"
+
+
+def codeintel_test_settings(
+    workspace_root: Path,
+    *,
+    lsp_enabled: bool = False,
+    lsp_command: str | None = None,
+    startup_timeout: int = 1,
+    request_timeout: int = 1,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        workspace_root=workspace_root,
+        context_char_budget=24000,
+        runtime=SimpleNamespace(max_tool_repeats=3, external_write_policy="deny"),
+        redis=SimpleNamespace(pubsub_enabled=False),
+        memory=SimpleNamespace(compaction_threshold_ratio=0.8, compaction_min_excluded_messages=4),
+        codeintel=SimpleNamespace(
+            enabled=True,
+            lsp_enabled=lsp_enabled,
+            max_file_bytes=512_000,
+            max_files=100,
+            context_symbol_limit=12,
+            context_diagnostic_limit=8,
+        ),
+        lsp=SimpleNamespace(
+            enabled=lsp_enabled,
+            python_command=lsp_command or sys.executable,
+            startup_timeout_seconds=startup_timeout,
+            request_timeout_seconds=request_timeout,
+            shutdown_timeout_seconds=1,
+            max_response_chars=200_000,
+            workspace_root=workspace_root,
+        ),
+    )
+
+
+def patch_codeintel_settings(monkeypatch, settings) -> None:
+    monkeypatch.setattr("backend.app.codeintel.indexer.get_settings", lambda: settings)
+    monkeypatch.setattr("backend.app.codeintel.lsp_client.get_settings", lambda: settings)
+    monkeypatch.setattr("backend.app.codeintel.lsp_service.get_settings", lambda: settings)
+    monkeypatch.setattr("backend.app.runtime.context_builder.get_settings", lambda: settings)
+    monkeypatch.setattr("backend.app.runtime.tool_executor.get_settings", lambda: settings)
+    monkeypatch.setattr("backend.app.runtime.loop_guard.get_settings", lambda: settings)
+    monkeypatch.setattr("backend.app.runtime.event_bus.get_settings", lambda: settings)
 
 
 def code_file(path: str = "app.py", *, workspace_id=None) -> CodeFile:
@@ -67,17 +121,26 @@ def test_python_ts_and_markdown_parsers_extract_symbols() -> None:
     assert [symbol.name for symbol in md.symbols] == ["Title", "Install"]
 
 
+def test_jsonrpc_message_round_trip() -> None:
+    payload = {"jsonrpc": "2.0", "id": 1, "result": {"ok": True}}
+    async def round_trip() -> dict:
+        reader = asyncio.StreamReader()
+        reader.feed_data(encode_jsonrpc_message(payload))
+        reader.feed_eof()
+        return await read_jsonrpc_message(reader)
+
+    decoded = asyncio.run(round_trip())
+    assert decoded == payload
+
+
 async def test_workspace_indexer_indexes_symbols_skips_unchanged_and_ignores_dirs(monkeypatch, tmp_path) -> None:
     (tmp_path / "pkg").mkdir()
     (tmp_path / "pkg" / "service.py").write_text("class Service:\n    def run(self):\n        return 1\n", encoding="utf-8")
     (tmp_path / "frontend.ts").write_text("export function boot() { return 1; }\n", encoding="utf-8")
     (tmp_path / "node_modules").mkdir()
     (tmp_path / "node_modules" / "skip.ts").write_text("function ignored() {}\n", encoding="utf-8")
-    settings = SimpleNamespace(
-        workspace_root=tmp_path,
-        codeintel=SimpleNamespace(max_file_bytes=512_000, max_files=100),
-    )
-    monkeypatch.setattr("backend.app.codeintel.indexer.get_settings", lambda: settings)
+    settings = codeintel_test_settings(tmp_path)
+    patch_codeintel_settings(monkeypatch, settings)
     db = FakeAsyncSession()
     indexer = WorkspaceIndexer()
     organization_id = uuid4()
@@ -126,7 +189,133 @@ async def test_diagnostics_parse_and_ingest() -> None:
     assert "unused" in created[0].message
 
 
-async def test_lsp_static_fallback_definition_and_references() -> None:
+async def test_lsp_health_reports_static_fallback_when_disabled(monkeypatch, tmp_path) -> None:
+    settings = codeintel_test_settings(tmp_path, lsp_enabled=False)
+    patch_codeintel_settings(monkeypatch, settings)
+
+    health = await lsp_service.health()
+
+    assert health["mode"] == "static_fallback"
+    assert health["real_lsp_enabled"] is False
+    assert "Static database index fallback" in str(health["reason"])
+
+
+async def test_lsp_health_reports_missing_command(monkeypatch, tmp_path) -> None:
+    settings = codeintel_test_settings(tmp_path, lsp_enabled=True, lsp_command="definitely-not-installed")
+    patch_codeintel_settings(monkeypatch, settings)
+
+    health = await lsp_service.health()
+
+    assert health["mode"] == "failed"
+    assert "not found" in str(health["last_error"])
+
+
+async def test_lsp_startup_timeout_is_reported(monkeypatch, tmp_path) -> None:
+    slow_file = tmp_path / "sleep_service.py"
+    slow_file.write_text("class Service:\n    pass\n", encoding="utf-8")
+    settings = codeintel_test_settings(tmp_path, lsp_enabled=True, startup_timeout=1, request_timeout=1)
+    settings.lsp.python_command = sys.executable
+    patch_codeintel_settings(monkeypatch, settings)
+    monkeypatch.setattr("backend.app.codeintel.lsp_client.get_settings", lambda: settings)
+    lsp_client._resolve_command = lambda _command: sys.executable  # type: ignore[method-assign]
+
+    original_exec = asyncio.create_subprocess_exec
+
+    async def patched_exec(*args, **kwargs):
+        return await original_exec(sys.executable, str(FAKE_LSP_SERVER), *args[1:], **kwargs)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", patched_exec)
+    settings.lsp.startup_timeout_seconds = 0
+    health = await lsp_service.health()
+    await lsp_service.shutdown()
+
+    assert health["mode"] == "failed"
+
+
+async def test_lsp_request_timeout_falls_back(monkeypatch, tmp_path) -> None:
+    timed_file = tmp_path / "timeout_service.py"
+    timed_file.write_text("class Service:\n    pass\n", encoding="utf-8")
+    settings = codeintel_test_settings(tmp_path, lsp_enabled=True, request_timeout=1)
+    patch_codeintel_settings(monkeypatch, settings)
+
+    original_exec = asyncio.create_subprocess_exec
+
+    async def patched_exec(*args, **kwargs):
+        return await original_exec(sys.executable, str(FAKE_LSP_SERVER), *args[1:], **kwargs)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", patched_exec)
+    settings.lsp.python_command = sys.executable
+    result = await lsp_service.document_symbols(
+        FakeAsyncSession(),
+        workspace_id=uuid4(),
+        file_path="timeout_service.py",
+        limit=20,
+    )
+    await lsp_service.shutdown()
+
+    assert result == []
+    assert lsp_service.status()["mode"] == "failed"
+
+
+async def test_lsp_workspace_outside_root_blocked(monkeypatch, tmp_path) -> None:
+    settings = codeintel_test_settings(tmp_path, lsp_enabled=True)
+    patch_codeintel_settings(monkeypatch, settings)
+
+    try:
+        await lsp_client.initialize(tmp_path.parent)
+    except PermissionError as exc:
+        assert "outside configured root" in str(exc)
+    else:
+        raise AssertionError("expected workspace root guard")
+
+
+async def test_lsp_fake_server_definition_references_and_diagnostics(monkeypatch, tmp_path) -> None:
+    source = tmp_path / "service.py"
+    source.write_text("class Service:\n    pass\n\nService()\n", encoding="utf-8")
+    settings = codeintel_test_settings(tmp_path, lsp_enabled=True)
+    settings.lsp.python_command = sys.executable
+    patch_codeintel_settings(monkeypatch, settings)
+
+    original_exec = asyncio.create_subprocess_exec
+
+    async def patched_exec(*args, **kwargs):
+        return await original_exec(sys.executable, str(FAKE_LSP_SERVER), *args[1:], **kwargs)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", patched_exec)
+    definition = await lsp_service.goto_definition(FakeAsyncSession(), workspace_id=uuid4(), file="service.py", line=1, column=0)
+    references = await lsp_service.find_references(
+        FakeAsyncSession(),
+        workspace_id=uuid4(),
+        file="service.py",
+        line=1,
+        column=0,
+        limit=20,
+    )
+    diagnostics = await lsp_service.get_diagnostics(
+        FakeAsyncSession(),
+        workspace_id=uuid4(),
+        file_path="service.py",
+        limit=20,
+    )
+    symbols = await lsp_service.document_symbols(
+        FakeAsyncSession(),
+        workspace_id=uuid4(),
+        file_path="service.py",
+        limit=20,
+    )
+    await lsp_service.shutdown()
+
+    assert definition is not None
+    assert definition["file_path"] == "service.py"
+    assert references[0]["file_path"] == "service.py"
+    assert diagnostics[0]["severity"] == "warning"
+    assert symbols[0]["name"] == "Service"
+    assert lsp_service.status()["mode"] in {"real_lsp", "failed"}
+
+
+async def test_lsp_static_fallback_definition_and_references(monkeypatch, tmp_path) -> None:
+    settings = codeintel_test_settings(tmp_path, lsp_enabled=False)
+    patch_codeintel_settings(monkeypatch, settings)
     file = code_file("service.py")
     symbol = CodeSymbol(
         id=uuid4(),
@@ -153,13 +342,13 @@ async def test_lsp_static_fallback_definition_and_references() -> None:
     )
     db = FakeAsyncSession(objects=[file, symbol, reference])
 
-    definition = await lsp_client.goto_definition(db, workspace_id=file.workspace_id, name="Service")
-    references = await lsp_client.find_references(db, workspace_id=file.workspace_id, name="Service")
+    definition = await lsp_service.goto_definition(db, workspace_id=file.workspace_id, name="Service")
+    references = await lsp_service.find_references(db, workspace_id=file.workspace_id, name="Service")
 
     assert definition is not None
     assert definition["name"] == "Service"
     assert references[0]["snippet"] == "Service()"
-    assert lsp_client.status()["mode"] == "static_fallback"
+    assert lsp_service.status()["mode"] == "static_fallback"
 
 
 async def test_codeintel_repository_code_map_counts() -> None:
@@ -209,12 +398,8 @@ async def test_codeintel_tools_registered_and_execute_with_tool_executor(monkeyp
         metadata_json={},
     )
     db = FakeAsyncSession(messages=[message], objects=[session, file, symbol])
-    settings = SimpleNamespace(
-        workspace_root=tmp_path,
-        runtime=SimpleNamespace(max_tool_repeats=3, external_write_policy="deny"),
-    )
-    monkeypatch.setattr("backend.app.runtime.tool_executor.get_settings", lambda: settings)
-    monkeypatch.setattr("backend.app.runtime.loop_guard.get_settings", lambda: settings)
+    settings = codeintel_test_settings(tmp_path)
+    patch_codeintel_settings(monkeypatch, settings)
 
     assert {"code.index", "code.symbols", "code.definition", "code.references", "code.diagnostics", "code.map"} <= set(
         tool_registry.names()
@@ -237,7 +422,9 @@ async def test_codeintel_tools_registered_and_execute_with_tool_executor(monkeyp
     assert outcome.output["output"]["symbols"][0]["name"] == "Service"
 
 
-async def test_codeintel_tools_direct_definition() -> None:
+async def test_codeintel_tools_direct_definition(monkeypatch, tmp_path) -> None:
+    settings = codeintel_test_settings(tmp_path)
+    patch_codeintel_settings(monkeypatch, settings)
     file = code_file("service.py")
     symbol = CodeSymbol(
         id=uuid4(),
@@ -260,7 +447,7 @@ async def test_codeintel_tools_direct_definition() -> None:
         agent_run_id=None,
         tool_call_id=None,
         agent_id="explore",
-        workspace_root="/workspace",
+        workspace_root=tmp_path,
     )
 
     symbols = await CodeSymbolsTool().run(CodeSymbolsTool.input_model(query="Service"), ctx)  # type: ignore[arg-type]
@@ -270,7 +457,9 @@ async def test_codeintel_tools_direct_definition() -> None:
     assert definition.output["definition"]["name"] == "Service"
 
 
-async def test_context_builder_includes_code_map_symbols_and_diagnostics() -> None:
+async def test_context_builder_includes_code_map_symbols_and_diagnostics(monkeypatch, tmp_path) -> None:
+    settings = codeintel_test_settings(tmp_path)
+    patch_codeintel_settings(monkeypatch, settings)
     session = make_session()
     message = make_user_message(session, "Please inspect Service")
     file = code_file("service.py", workspace_id=session.workspace_id)

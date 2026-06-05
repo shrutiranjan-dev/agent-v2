@@ -1006,3 +1006,35 @@
 - Exact files: `backend/app/mcp/client.py`, `backend/app/api/routes_mcp.py`.
 - Exact recommended fix: implement SDK-supported streamable HTTP/SSE clients with authentication, timeout, reconnect, and health semantics.
 - Risk if ignored: real MCP support is limited to local stdio servers.
+
+## LSP lifecycle follow-through
+
+- Current improvement: real stdio JSON-RPC LSP lifecycle is now implemented with initialize/shutdown, `didOpen`, document symbols, definitions, references, diagnostics, timeout handling, and bounded response parsing.
+- Why it matters: code intelligence can now use a real language server when configured instead of only a placeholder adapter.
+- Exact files: `backend/app/codeintel/lsp_client.py`, `backend/app/codeintel/lsp_service.py`, `backend/app/api/routes_codeintel.py`, `backend/app/tools/codeintel.py`.
+- Exact recommended next fix: add pooled/per-workspace LSP supervision only after process ownership and cleanup semantics are designed.
+- Risk if ignored: the current one-process-at-a-time model is safe and honest, but repeated process startup can add latency for frequent file-based LSP requests.
+
+## Static fallback honesty
+
+- Current improvement: `/health/codeintel` now reports `real_lsp`, `static_fallback`, or `failed` and keeps the indexed database fallback active after command, startup, request, or runtime failures.
+- Why it matters: operators can tell whether semantics are truly coming from a live language server or from the static index.
+- Exact files: `backend/app/codeintel/lsp_service.py`, `backend/app/api/routes_codeintel.py`.
+- Exact recommended next fix: add frontend wording that distinguishes semantic LSP results from indexed fallback results in the Code panel.
+- Risk if ignored: the backend is honest, but the UI may still leave users guessing which path answered a given request.
+
+## Windows host-side Redis behavior
+
+- Current improvement: host-side unit tests no longer fail when `.env` points Redis at the Docker hostname `redis`; the runtime now degrades to in-process event and queue fallback outside Docker.
+- Why it matters: plain `pytest backend/tests` is now viable on Windows and other host environments without special Redis overrides.
+- Exact files: `backend/app/runtime/event_bus.py`, `backend/app/queue/jobs.py`, `backend/app/queue/redis_client.py`, `backend/tests/test_event_bus.py`, `backend/tests/test_queue_jobs.py`.
+- Exact recommended next fix: add structured logging/metrics for Redis fallback activation so developers can distinguish an intentional host-test fallback from an unexpected runtime outage.
+- Risk if ignored: behavior is correct, but fallback activation will remain mostly implicit unless someone checks health responses or code paths directly.
+
+## LSP smoke coverage
+
+- Current improvement: added `scripts/lsp-smoke.sh`, which validates the current LSP mode honestly and can require a real server with `STRICT_REAL_LSP=1`.
+- Why it matters: deployment validation now has a dedicated code path for real-LSP lifecycle checks instead of folding everything into the broader codeintel smoke.
+- Exact files: `scripts/lsp-smoke.sh`, `scripts/codeintel-smoke.sh`.
+- Exact recommended next fix: run `scripts/lsp-smoke.sh` in Docker CI twice when feasible, once in fallback mode and once with `AP_LSP_ENABLED=true` and a real `pylsp` install.
+- Risk if ignored: the script exists and local runs are possible, but CI will not automatically prove both fallback and real-LSP startup paths.

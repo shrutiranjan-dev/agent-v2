@@ -4,6 +4,7 @@ from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
+from redis.exceptions import ConnectionError as RedisConnectionError
 
 from backend.app.core.config import Settings
 from backend.app.db.models import AgentRun, PermissionRequest, QueueJobRecord, Session, ToolCall
@@ -37,6 +38,16 @@ class FakeRedis:
 
     async def aclose(self) -> None:
         self.closed = True
+
+
+class FailingRedis(FakeRedis):
+    async def rpush(self, name: str, value: str) -> None:
+        _ = name, value
+        raise RedisConnectionError("redis unavailable")
+
+    async def blpop(self, name: str, timeout: int = 0):
+        _ = name, timeout
+        raise RedisConnectionError("redis unavailable")
 
 
 def queue_settings(*, enabled: bool = True):
@@ -264,6 +275,19 @@ async def test_failed_job_schedules_retry_and_records_last_error() -> None:
     assert job.status == JobStatus.QUEUED
     assert job.last_error == "temporary"
     assert job.available_at >= datetime.now(UTC) - timedelta(seconds=1)
+
+
+async def test_queue_falls_back_to_local_buffer_when_redis_unavailable() -> None:
+    queue = RuntimeQueue(settings=queue_settings(), redis_factory=FailingRedis)
+    session = make_session()
+    run = make_run(session)
+    job = make_job_record(session, run)
+
+    await queue.publish_job(job)
+    dequeued = await queue.dequeue()
+
+    assert dequeued is not None
+    assert dequeued.queue_job_id == str(job.id)
 
 
 async def test_worker_executes_queued_agent_run(monkeypatch) -> None:

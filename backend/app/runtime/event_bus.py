@@ -6,13 +6,14 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import WebSocket
+from redis.exceptions import RedisError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.config import get_settings
 from backend.app.core.redaction import redact_data
 from backend.app.db.models import SystemEvent
-from backend.app.queue.redis_client import get_redis
+from backend.app.queue.redis_client import get_redis, redis_transport_available
 
 
 class EventBus:
@@ -26,16 +27,15 @@ class EventBus:
 
     async def subscribe(self, websocket: WebSocket, session_id: UUID | None = None) -> None:
         await websocket.accept()
-        if self._redis_enabled() and session_id:
-            task = asyncio.create_task(self._redis_forward_loop(websocket, session_id))
-            async with self._lock:
-                self._redis_tasks[websocket] = task
-            return
         async with self._lock:
             if session_id:
                 self._session_subscribers[str(session_id)].add(websocket)
             else:
                 self._global_subscribers.add(websocket)
+        if self._redis_enabled() and session_id:
+            task = asyncio.create_task(self._redis_forward_loop(websocket, session_id))
+            async with self._lock:
+                self._redis_tasks[websocket] = task
 
     async def unsubscribe(self, websocket: WebSocket, session_id: UUID | None = None) -> None:
         async with self._lock:
@@ -77,8 +77,10 @@ class EventBus:
         await db.flush()
         envelope = self.serialize(event)
         if self._redis_enabled() and session_id:
-            await self._publish_redis(session_id=session_id, envelope=envelope)
-            await self._broadcast(envelope, session_id=None)
+            if await self._publish_redis(session_id=session_id, envelope=envelope):
+                await self._broadcast(envelope, session_id=None)
+            else:
+                await self._broadcast(envelope, session_id=session_id)
         else:
             await self._broadcast(envelope, session_id=session_id)
         return event
@@ -144,12 +146,15 @@ class EventBus:
     def _redis_enabled(self) -> bool:
         if self._redis_enabled_override is not None:
             return self._redis_enabled_override
-        return get_settings().redis.pubsub_enabled
+        return get_settings().redis.pubsub_enabled and redis_transport_available()
 
-    async def _publish_redis(self, *, session_id: UUID, envelope: dict[str, Any]) -> None:
+    async def _publish_redis(self, *, session_id: UUID, envelope: dict[str, Any]) -> bool:
         client = self._redis_factory()
         try:
             await client.publish(self.redis_channel(session_id), json.dumps(envelope, default=str))
+            return True
+        except (RedisError, OSError, ValueError, TypeError):
+            return False
         finally:
             close = getattr(client, "aclose", None)
             if close:
@@ -170,6 +175,8 @@ class EventBus:
                 await websocket.send_json(json.loads(data))
         except asyncio.CancelledError:
             raise
+        except (AttributeError, RedisError, OSError, ValueError, TypeError):
+            return
         finally:
             try:
                 await pubsub.unsubscribe(channel)

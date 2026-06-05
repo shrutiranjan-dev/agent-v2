@@ -26,13 +26,19 @@ coverage/
 *.log
 logs/
 
-# Runtime/artifacts
-artifacts/
-qa-artifacts/
-tmp/
-.tmp/
-uploads/
-downloads/
+# Runtime artifacts only
+/artifacts/
+/qa-artifacts/
+/tmp/
+/.tmp/
+/uploads/
+/downloads/
+
+# Keep backend source package tracked
+!backend/app/artifacts/
+!backend/app/artifacts/**
+backend/app/artifacts/__pycache__/
+backend/app/artifacts/**/*.py[cod]
 
 # Docker/local volumes
 postgres-data/

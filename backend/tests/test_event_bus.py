@@ -1,6 +1,8 @@
 from datetime import UTC, datetime
 from uuid import uuid4
 
+from redis.exceptions import ConnectionError as RedisConnectionError
+
 from backend.app.core.events import EventType
 from backend.app.db.models import SystemEvent
 from backend.app.runtime.event_bus import EventBus
@@ -38,6 +40,12 @@ class FakeRedisClient:
 
     async def aclose(self) -> None:
         self.closed = True
+
+
+class FailingRedisClient(FakeRedisClient):
+    async def publish(self, channel: str, payload: str) -> None:
+        _ = channel, payload
+        raise RedisConnectionError("redis unavailable")
 
 
 async def test_event_publish_persists_and_broadcasts_session_event() -> None:
@@ -110,3 +118,21 @@ async def test_redis_bus_path_uses_session_channel() -> None:
     assert channel == f"session:{session_id}:events"
     assert "permission.requested" in payload
     assert fake_redis.closed
+
+
+async def test_redis_bus_falls_back_to_local_broadcast_when_redis_unavailable() -> None:
+    db = FakeAsyncSession()
+    session_id = uuid4()
+    websocket = FakeWebSocket()
+    bus = EventBus(redis_enabled=True, redis_factory=FailingRedisClient)
+
+    await bus.subscribe(websocket, session_id=session_id)
+    await bus.publish(
+        db,
+        event_type=EventType.PERMISSION_REQUESTED,
+        session_id=session_id,
+        payload={"id": "permission-1"},
+    )
+
+    assert websocket.sent
+    assert websocket.sent[-1]["session_id"] == str(session_id)
