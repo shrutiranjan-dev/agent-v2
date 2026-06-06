@@ -5,11 +5,17 @@ DATABASE_URL="${AP_TEST_POSTGRES_URL:-${AP_DATABASE_URL:-}}"
 VENV_PYTHON=".venv/bin/python"
 VENV_ALEMBIC=".venv/bin/alembic"
 
-if [[ -x ".venv/Scripts/python.exe" ]]; then
+if [[ "$(uname -s)" != "Linux" && -x ".venv/Scripts/python.exe" ]]; then
   VENV_PYTHON=".venv/Scripts/python.exe"
 fi
-if [[ -x ".venv/Scripts/alembic.exe" ]]; then
+if [[ "$(uname -s)" != "Linux" && -x ".venv/Scripts/alembic.exe" ]]; then
   VENV_ALEMBIC=".venv/Scripts/alembic.exe"
+fi
+if [[ ! -x "${VENV_PYTHON}" ]]; then
+  VENV_PYTHON="python"
+fi
+if [[ ! -x "${VENV_ALEMBIC}" ]]; then
+  VENV_ALEMBIC="${VENV_PYTHON} -m alembic"
 fi
 
 if [[ -z "${DATABASE_URL}" ]]; then
@@ -19,7 +25,7 @@ fi
 
 export AP_DATABASE_URL="${DATABASE_URL}"
 
-"${VENV_ALEMBIC}" -c backend/alembic.ini upgrade head
+${VENV_ALEMBIC} -c backend/alembic.ini upgrade head
 
 "${VENV_PYTHON}" - <<'PY'
 import os

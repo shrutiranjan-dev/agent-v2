@@ -3,12 +3,15 @@ set -euo pipefail
 
 BACKEND_URL="${BACKEND_URL:-${AP_BACKEND_URL:-http://localhost:8000}}"
 PYTHON_BIN="python3"
+MCP_PLUGIN_SMOKE_MANIFEST_PATH="${MCP_PLUGIN_SMOKE_MANIFEST_PATH:-/workspace/plugins/.smoke-sample-plugin.json}"
 
-if [[ -x ".venv/Scripts/python.exe" ]]; then
+if [[ "$(uname -s)" != "Linux" && -x ".venv/Scripts/python.exe" ]]; then
   PYTHON_BIN=".venv/Scripts/python.exe"
 elif [[ -x ".venv/bin/python" ]]; then
   PYTHON_BIN=".venv/bin/python"
 fi
+
+export MCP_PLUGIN_SMOKE_MANIFEST_PATH
 
 echo "mcp/plugin smoke: backend=${BACKEND_URL}"
 
@@ -77,9 +80,10 @@ if not connected.get("last_error"):
 print("MCP_REAL_SERVER=not_configured")
 
 project_root = Path.cwd()
-plugin_dir = project_root / "plugins"
+manifest_path = Path(os.environ.get("MCP_PLUGIN_SMOKE_MANIFEST_PATH") or "/workspace/plugins/.smoke-sample-plugin.json")
+plugin_dir = manifest_path.parent
 plugin_dir.mkdir(exist_ok=True)
-manifest = plugin_dir / ".smoke-sample-plugin.json"
+manifest = manifest_path
 try:
     manifest.write_text(
         json.dumps(
@@ -104,7 +108,7 @@ try:
         ),
         encoding="utf-8",
     )
-    plugin = request("/plugins/load", "POST", {"manifest_path": "/workspace/plugins/.smoke-sample-plugin.json", "trusted": True})["plugin"]
+    plugin = request("/plugins/load", "POST", {"manifest_path": str(manifest), "trusted": True})["plugin"]
     if plugin["enabled"]:
         raise SystemExit("Plugin was auto-enabled unexpectedly")
     tools = request("/plugins/tools")["tools"]

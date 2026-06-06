@@ -6,7 +6,7 @@ SKIP_REAL_MCP_IF_SDK_MISSING="${SKIP_REAL_MCP_IF_SDK_MISSING:-0}"
 SKIP_RUNTIME_EXECUTE_IF_TEST_ENDPOINT_DISABLED="${SKIP_RUNTIME_EXECUTE_IF_TEST_ENDPOINT_DISABLED:-1}"
 PYTHON_BIN="python3"
 
-if [[ -x ".venv/Scripts/python.exe" ]]; then
+if [[ "$(uname -s)" != "Linux" && -x ".venv/Scripts/python.exe" ]]; then
   PYTHON_BIN=".venv/Scripts/python.exe"
 elif [[ -x ".venv/bin/python" ]]; then
   PYTHON_BIN=".venv/bin/python"

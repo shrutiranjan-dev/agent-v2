@@ -1,0 +1,41 @@
+name: Repo Hygiene
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  hygiene:
+    name: Hygiene and Secret Safety
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check forbidden tracked files
+        run: |
+          test ! -f .env
+          ! git ls-files | grep -Ei '(^|/)(\.env|.*\.pem|.*\.key|id_rsa|id_ed25519|credentials\.json)$'
+          ! git ls-files | grep -Ei '(^|/)(node_modules|\.venv|venv|__pycache__|postgres-data|redis-data|qdrant-data|neo4j-data|minio-data|clickhouse-data|ollama-data)(/|$)|external/opencode-source/\.git(/|$)'
+      - name: Check artifact source package is tracked
+        run: |
+          ! git check-ignore -q backend/app/artifacts/artifact_service.py
+          test -f backend/app/artifacts/__init__.py
+          test -f backend/app/artifacts/artifact_service.py
+      - name: Validate flow parity JSON
+        run: python -m json.tool docs/opencode-study/flow-parity-matrix.json >/tmp/flow-parity.valid.json
+      - name: Check shell scripts parse
+        run: |
+          for script in scripts/*.sh; do
+            bash -n "$script"
+          done
+      - name: Check line-ending policy
+        run: |
+          test -f .gitattributes
+          grep -q '\*.sh text eol=lf' .gitattributes
+          grep -q '\*.ps1 text eol=crlf' .gitattributes

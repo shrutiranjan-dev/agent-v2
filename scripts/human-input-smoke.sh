@@ -14,7 +14,7 @@ else
 fi
 export SMOKE_TMP_DIR SMOKE_TMP_DIR_PY
 
-if [[ -x ".venv/Scripts/python.exe" ]]; then
+if [[ "$(uname -s)" != "Linux" && -x ".venv/Scripts/python.exe" ]]; then
   VENV_PYTHON=".venv/Scripts/python.exe"
 fi
 

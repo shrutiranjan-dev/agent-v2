@@ -1,0 +1,82 @@
+name: Manual Smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  docker-smoke:
+    name: Docker Compose Smoke Suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      AP_ENABLE_TEST_ENDPOINTS: "true"
+      AP_OLLAMA_BASE_URL: http://127.0.0.1:9
+      AP_TEST_POSTGRES_URL: postgresql+psycopg://agent:agent@localhost:15432/agent_platform
+      API_BASE: http://localhost:8000
+      BACKEND_URL: http://localhost:8000
+      AP_BACKEND_URL: http://localhost:8000
+      STRICT_REAL_LSP: "0"
+      SKIP_REAL_MCP_IF_SDK_MISSING: "0"
+      SKIP_RUNTIME_EXECUTE_IF_TEST_ENDPOINT_DISABLED: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install host smoke dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[test]"
+      - name: Prepare CI env file
+        run: |
+          cp .env.example .env
+          {
+            echo "AP_ENABLE_TEST_ENDPOINTS=true"
+            echo "AP_OLLAMA_BASE_URL=http://127.0.0.1:9"
+            echo "AP_TEST_POSTGRES_URL=postgresql+psycopg://agent:agent@localhost:15432/agent_platform"
+          } >> .env
+      - name: Build and start Docker services
+        run: docker compose up -d --build
+      - name: Wait for backend health
+        run: |
+          for attempt in {1..120}; do
+            if curl -fsS http://localhost:8000/health >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose ps
+          docker compose logs backend
+          exit 1
+      - name: Run smoke suite
+        run: |
+          bash scripts/db-migration-smoke.sh
+          bash scripts/codeintel-smoke.sh
+          bash scripts/lsp-smoke.sh
+          bash scripts/mcp-plugin-smoke.sh
+          bash scripts/observability-smoke.sh
+          bash scripts/real-mcp-smoke.sh
+      - name: Collect Docker logs
+        if: always()
+        run: |
+          mkdir -p smoke-logs
+          docker compose ps > smoke-logs/compose-ps.txt
+          docker compose logs --no-color > smoke-logs/compose.log
+      - name: Upload Docker logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: manual-smoke-docker-logs
+          path: smoke-logs
+      - name: Stop Docker services
+        if: always()
+        run: docker compose down -v

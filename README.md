@@ -1,5 +1,8 @@
 # Local Agent Platform
 
+[![CI](https://github.com/shrutiranjan-dev/agent-v2/actions/workflows/ci.yml/badge.svg)](https://github.com/shrutiranjan-dev/agent-v2/actions/workflows/ci.yml)
+[![Repo Hygiene](https://github.com/shrutiranjan-dev/agent-v2/actions/workflows/repo-hygiene.yml/badge.svg)](https://github.com/shrutiranjan-dev/agent-v2/actions/workflows/repo-hygiene.yml)
+
 A Python local-first multi-agent runtime inspired by architectural patterns studied from OpenCode, implemented as an independent product with its own Python backend, React dashboard, PostgreSQL-first data model, and local Ollama-only provider layer.
 
 This project is not affiliated with OpenCode and does not reuse OpenCode branding or package identity. The OpenCode source clone is kept under `external/opencode-source` only for architecture study.
@@ -161,6 +164,10 @@ cd frontend
 npm install
 npm run build
 ```
+
+## CI
+
+GitHub Actions validate backend quality, frontend build, Docker Compose config, real Postgres migrations, deterministic non-Ollama smokes, and repo hygiene. Default CI requires no secrets and no cloud/model provider. See [docs/ci.md](docs/ci.md) for workflow details and local reproduction commands.
 
 ## Docker Services
 

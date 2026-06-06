@@ -14,7 +14,7 @@ fi
 export API_BASE SMOKE_TMP_DIR_PY
 
 PYTHON=".venv/bin/python"
-if [[ -x ".venv/Scripts/python.exe" ]]; then
+if [[ "$(uname -s)" != "Linux" && -x ".venv/Scripts/python.exe" ]]; then
   PYTHON=".venv/Scripts/python.exe"
 fi
 
