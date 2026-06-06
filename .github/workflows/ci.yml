@@ -325,11 +325,11 @@ jobs:
           PY
       - name: Verify CLI help lists the --check flag
         # Use Python (not grep) to check for the --check flag in tui --help.
-        # Click/Typer help formatting varies by version (option names can
-        # be wrapped, ANSI-styled, or split across continuation lines),
-        # and grep on a redirected file is fragile across platforms and
-        # library versions. A Python substring check handles all of those
-        # and surfaces the actual help on failure.
+        # Click/Typer/Rich help formatting varies by version and platform:
+        # help can be wrapped, ANSI-styled, or emitted through stderr
+        # instead of stdout on some runner combinations. A combined
+        # stdout+stderr substring check keeps the smoke aligned with the
+        # backend test coverage and surfaces the actual help on failure.
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -341,7 +341,8 @@ jobs:
               capture_output=True,
               text=True,
           )
-          if "--check" not in result.stdout:
+          combined = (result.stdout or "") + (result.stderr or "")
+          if "--check" not in combined:
               print("STDOUT:")
               print(result.stdout)
               print("STDERR:")
