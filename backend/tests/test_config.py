@@ -29,3 +29,13 @@ def test_production_defaults_are_rejected(monkeypatch) -> None:
 
     assert "Invalid production configuration" in str(exc.value)
     assert "security.secret_key" in str(exc.value)
+
+
+def test_workspace_root_override_flows_into_lsp_when_lsp_override_is_unset(monkeypatch) -> None:
+    monkeypatch.setenv("AP_WORKSPACE_ROOT", "/tmp/workspace-root")
+    monkeypatch.delenv("AP_LSP_WORKSPACE_ROOT", raising=False)
+
+    settings = Settings(_env_file=None)
+
+    assert settings.runtime.workspace_root == settings.lsp.workspace_root
+    assert settings.lsp.workspace_root.as_posix() == "/tmp/workspace-root"

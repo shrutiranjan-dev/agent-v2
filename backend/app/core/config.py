@@ -588,6 +588,8 @@ class Settings(BaseSettings):
             self.ollama.num_predict = self.ollama_num_predict_override
         if self.workspace_root_override is not None:
             self.runtime.workspace_root = self.workspace_root_override
+            if self.lsp_workspace_root_override is None:
+                self.lsp.workspace_root = self.workspace_root_override
         if self.permission_wait_timeout_seconds_override is not None:
             self.runtime.permission_wait_timeout_seconds = self.permission_wait_timeout_seconds_override
         if self.context_char_budget_override is not None:
