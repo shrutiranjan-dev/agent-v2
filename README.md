@@ -93,6 +93,24 @@ $env:AP_TEST_POSTGRES_URL="postgresql+psycopg://agent:agent@localhost:15432/agen
 powershell -ExecutionPolicy Bypass -File scripts\queue-worker-smoke.ps1
 ```
 
+A single `validate-local.ps1` script runs the full default validation suite (compile, ruff, pytest, frontend build, docker compose config, CLI/TUI smoke). Useful flags include `-WithDocker` to check docker service health and `-WithSmokes` to additionally run all available PowerShell-native smokes:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\validate-local.ps1
+powershell -ExecutionPolicy Bypass -File scripts\validate-local.ps1 -WithSmokes
+powershell -ExecutionPolicy Bypass -File scripts\validate-local.ps1 -SkipFrontend
+powershell -ExecutionPolicy Bypass -File scripts\validate-local.ps1 -BaseUrl http://localhost:8000
+```
+
+PowerShell-native smokes include `cli-tui-smoke.ps1`, `codeintel-smoke.ps1`, `lsp-smoke.ps1`, `observability-smoke.ps1`, `queue-worker-smoke.ps1`, and `db-migration-smoke.ps1`. The `mcp-plugin-smoke.ps1`, `real-mcp-smoke.ps1`, and `permission-resume-smoke.ps1` wrappers delegate to their Bash counterparts when Git Bash, WSL, or system Bash is available; otherwise they skip with a clear message.
+
+A `validate-local.sh` mirror is available for Linux/macOS developers:
+
+```bash
+bash scripts/validate-local.sh
+bash scripts/validate-local.sh --with-smokes
+```
+
 Other smoke checks still run through Git Bash or WSL:
 
 ```bash

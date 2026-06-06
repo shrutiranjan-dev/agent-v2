@@ -28,14 +28,51 @@ jobs:
           test -f backend/app/artifacts/__init__.py
           test -f backend/app/artifacts/artifact_service.py
       - name: Validate flow parity JSON
-        run: python -m json.tool docs/opencode-study/flow-parity-matrix.json >/tmp/flow-parity.valid.json
+        run: |
+          python -m json.tool docs/opencode-study/flow-parity-matrix.json >/tmp/flow-parity.valid.json
+          python -m json.tool docs/opencode-study/flow-parity-matrix-verified.json >/tmp/flow-parity-verified.valid.json
       - name: Check shell scripts parse
         run: |
           for script in scripts/*.sh; do
             bash -n "$script"
           done
+      - name: Check CRLF in shell scripts
+        run: |
+          if grep -l $'\r' scripts/*.sh 2>/dev/null; then
+            echo "Shell scripts must use LF line endings" >&2
+            exit 1
+          fi
       - name: Check line-ending policy
         run: |
           test -f .gitattributes
           grep -q '\*.sh text eol=lf' .gitattributes
           grep -q '\*.ps1 text eol=crlf' .gitattributes
+      - name: Check PowerShell scripts parse
+        shell: pwsh
+        run: |
+          Get-ChildItem scripts -Filter *.ps1 | ForEach-Object {
+            $null = [System.Management.Automation.PSParser]::Tokenize((Get-Content $_.FullName -Raw), [ref]$null)
+            Write-Host "parsed $($_.Name)"
+          }
+      - name: Check no CRLF in PowerShell scripts
+        run: |
+          if grep -l $'\r' scripts/*.ps1 2>/dev/null; then
+            echo "PowerShell scripts must use CRLF line endings" >&2
+            exit 1
+          fi
+      - name: Verify backend does not ignore artifact source package
+        run: |
+          test -f backend/app/artifacts/artifact_service.py
+          ! git check-ignore -q backend/app/artifacts/artifact_service.py
+      - name: Check pyproject.toml syntax
+        run: |
+          python -c "import tomllib; tomllib.loads(open('pyproject.toml', 'rb').read())"
+      - name: Upload hygiene log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: repo-hygiene-log
+          path: /tmp/*.valid.json
+          if-no-files-found: ignore
+          retention-days: 7
+

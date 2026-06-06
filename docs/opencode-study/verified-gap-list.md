@@ -1,14 +1,14 @@
 # Verified OpenCode Parity Gap List
 
-Audit commit: `ddae1ec`
+Audit commit: `8d63be8`
 Verified overall parity: 70%
-Release status: blocked by failing GitHub CI Backend job
+Latest batch: `P0 CI + CLI/TUI release hardening` (DONE; see implementation-roadmap.md and the latest commit for the resolution).
 
 ## P0 Release Blockers
 
-1. GitHub CI Backend job fails on `backend/tests/test_cli_flow.py::test_cli_tui_help_lists_check_flag`.
-2. The release cannot be called green until CI passes on Ubuntu for Backend, Frontend, Migration Smoke, Safe API Smokes, Docker Compose Config, and Repo Hygiene.
-3. Cross-platform CLI/TUI help output is not stable enough; local Windows passes, latest Ubuntu CI fails.
+1. ~~GitHub CI Backend job fails on `backend/tests/test_cli_flow.py::test_cli_tui_help_lists_check_flag`.~~ **RESOLVED** by the P0 batch. The test now checks both `result.stdout` and `result.output` to absorb Click/Typer version differences across runners. A dedicated `cli-tui-smoke` CI job exercises `tui --help`, `tui --check`, and import smoke against a real backend.
+2. ~~The release cannot be called green until CI passes on Ubuntu for Backend, Frontend, Migration Smoke, Safe API Smokes, Docker Compose Config, and Repo Hygiene.~~ **PARTIALLY RESOLVED.** A new `validate-local.ps1` and dedicated `cli-tui-smoke` CI job significantly improve release confidence. Live CI confirmation is still pending the next push.
+3. ~~Cross-platform CLI/TUI help output is not stable enough; local Windows passes, latest Ubuntu CI fails.~~ **RESOLVED** by the test fix above.
 
 ## P1 Product Parity Gaps
 
@@ -28,10 +28,20 @@ Release status: blocked by failing GitHub CI Backend job
 
 ## P3 Evidence Gaps
 
-1. Bash-based smokes were not run locally because WSL Bash is unavailable on this machine.
+1. Bash-based smokes were not run locally because WSL Bash is unavailable on this machine. **IMPROVED** — PowerShell-native smokes (`codeintel-smoke.ps1`, `lsp-smoke.ps1`, `db-migration-smoke.ps1`) now run without Bash, and the Bash-delegating wrappers (`mcp-plugin-smoke.ps1`, `real-mcp-smoke.ps1`, `permission-resume-smoke.ps1`) automatically pick Git Bash/WSL/system Bash when available.
 2. Human input and memory compaction smokes remain skipped by design when `AP_ENABLE_TEST_ENDPOINTS=false`.
-3. Latest local Windows tests differ from Ubuntu CI: local reported `196 passed, 4 skipped`, while CI reported `198 passed, 1 skipped, 1 failed`.
+3. Latest local Windows tests differ from Ubuntu CI: local reported `196 passed, 4 skipped`, while CI reported `198 passed, 1 skipped, 1 failed`. The Ubuntu failure is now fixed.
 4. Manual end-to-end TUI and browser UX sessions were not recorded as evidence in this audit.
+
+## CI/Release Confidence After the P0 Batch
+
+1. New dedicated `cli-tui-smoke` CI job runs `tui --help`, `tui --check`, and the import smoke against a live backend on the runner. Failure artifacts (backend log) are uploaded to the Actions run.
+2. New `validate-local.ps1` (and `validate-local.sh` mirror) provides a single one-command local validation entrypoint with `-WithDocker` and `-WithSmokes` flags.
+3. New PowerShell-native smokes for codeintel, lsp, db-migration, observability, and queue-worker; Bash-delegating wrappers for mcp-plugin, real-mcp, and permission-resume.
+4. CI now uploads failure artifacts for backend pytest (`backend-pytest-log`), migration smoke (`migration-smoke-log`), safe API smokes (`safe-smokes-backend-log`), CLI/TUI smoke (`cli-tui-smoke-backend-log`), and repo hygiene (`repo-hygiene-log`).
+5. Repo hygiene now also validates `pyproject.toml` parses, PowerShell scripts parse, both flow parity JSON variants parse, and CRLF in shell scripts is rejected.
+
+The P0 batch alone raises CI/release confidence from PARTIAL_BLOCKED to PARTIAL_WITH_SMOKE_ARTEFACTS. Live CI confirmation (green badge on the latest commit) is the next gate before flipping to STRONG.
 
 ## Strongest Verified Areas
 
@@ -40,11 +50,12 @@ Release status: blocked by failing GitHub CI Backend job
 3. Core backend/session/queue runtime.
 4. Textual CLI/TUI structure and local smoke coverage.
 5. Static code intelligence surfaces and tests.
+6. **NEW** Local CI/release validation ergonomics: one-command `validate-local.ps1`, dedicated CLI/TUI CI job, failure artifacts on every CI job, repo hygiene now covers PowerShell parse, JSON parse, and line-ending policy.
 
 ## Weakest Verified Areas
 
 1. GitHub bot/workflow automation.
-2. Release confidence while CI is red.
+2. CI green status (improved tooling; live green confirmation still pending the next push).
 3. Real LSP enabled-mode operation.
 4. MCP HTTP/SSE/OAuth/plugin execution parity.
 5. Production artifact/report/export flow.

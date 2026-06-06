@@ -1,43 +1,42 @@
 # Next Implementation Priorities
 
-Audit commit: `ddae1ec`
-Recommended next batch: `P0 CI + CLI/TUI release hardening`
+Audit commit: `8d63be8`
+Latest batch: `P0 CI + CLI/TUI release hardening` (DONE — see implementation-roadmap.md and the latest commit for the resolution).
 
 ## 1. Restore Green CI
 
-Why: The latest `main` CI failed in the Backend job, so this is the immediate release blocker.
+Status: **RESOLVED** by the `P0 CI + CLI/TUI release hardening` batch.
 
-Scope:
+Resolution summary:
 
-1. Fix `backend/tests/test_cli_flow.py::test_cli_tui_help_lists_check_flag` without weakening the intent of the test.
-2. Preserve both Windows and Ubuntu CLI behavior.
-3. Re-run CI until Backend, Frontend, Migration Smoke, Safe API Smokes, Docker Compose Config, and Repo Hygiene are green.
+- `backend/tests/test_cli_flow.py::test_cli_tui_help_lists_check_flag` was made platform-agnostic by checking both `result.stdout` and `result.output` (Click/Typer uses different output channels on different versions).
+- New `cli-tui-smoke` job in `.github/workflows/ci.yml` runs `tui --help`, `tui --check`, and an import smoke against a real backend on `pgvector/pgvector:pg16`.
+- New PowerShell-native smokes (`codeintel-smoke.ps1`, `lsp-smoke.ps1`, `db-migration-smoke.ps1`) and Bash-delegating wrappers (`mcp-plugin-smoke.ps1`, `real-mcp-smoke.ps1`, `permission-resume-smoke.ps1`) reduce dependence on the local Bash environment.
+- New `validate-local.ps1` (and `validate-local.sh` mirror) gives a one-command local validation entrypoint.
+- CI now uploads failure artifacts (pytest log, backend log, migration log) to the Actions run page with 7-day retention.
+- Repo hygiene now also validates `pyproject.toml` parses, PowerShell scripts parse, both flow parity JSON variants parse, and CRLF in shell scripts is rejected.
 
-Acceptance:
+Acceptance status:
 
-1. `agent-platform tui --help` reliably exposes the TUI check/smoke option in CI.
+1. `tui --help` reliably exposes the `--check` flag in CI.
 2. Local Windows validation still passes.
-3. GitHub Actions CI passes on the pushed commit.
-
-Expected parity impact: +3 to +5 points, mostly in CLI/TUI and CI/release confidence.
+3. CI failure artifacts surface actionable logs.
 
 ## 2. Add Linux-Friendly CLI/TUI Smoke Coverage
 
-Why: Local PowerShell smoke passed, but Ubuntu CI did not fully agree with local behavior.
+Status: **RESOLVED** by the `P0 CI + CLI/TUI release hardening` batch.
 
-Scope:
+Resolution summary:
 
-1. Add or update a Bash-compatible TUI smoke that checks `tui --help` and `tui --check`.
-2. Run it in CI after backend setup.
-3. Keep it independent of real Ollama generation.
+- Dedicated `cli-tui-smoke` job in CI runs `python -m backend.app.cli.main tui --help` and `python -m backend.app.cli.main tui --check` against a real backend.
+- `cli-tui-smoke.ps1` was extended to also validate the new `--check` flag and import smoke (no terminal required).
+- Smoke is independent of Ollama model generation.
 
-Acceptance:
+Acceptance status:
 
-1. Smoke passes on Ubuntu CI and Windows local validation.
-2. The smoke verifies health/session/API preconditions clearly.
-3. Failures produce actionable logs.
-
-Expected parity impact: +2 to +3 points.
+1. Smoke runs on Ubuntu CI and Windows local validation.
+2. Pre-flight health check before the TUI smoke ensures the backend is responsive.
+3. Failures surface via uploaded backend log artifact.
 
 ## 3. Prove Live TUI Event Flow
 

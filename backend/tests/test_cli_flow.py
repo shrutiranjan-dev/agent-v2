@@ -764,11 +764,17 @@ def test_cli_tui_check_flag_invokes_check() -> None:
 
 
 def test_cli_tui_help_lists_check_flag() -> None:
-    """`agentv2 tui --help` should advertise the new --check flag."""
+    """`agentv2 tui --help` should advertise the new --check flag.
+
+    Click/Typer versions report help output through ``result.stdout`` on
+    some platforms and ``result.output`` on others, so we look at both
+    to keep this test stable across runners.
+    """
     runner = CliRunner()
     result = runner.invoke(app, ["tui", "--help"])
     assert result.exit_code == 0
-    assert "--check" in result.stdout
+    combined = (result.stdout or "") + (getattr(result, "output", "") or "")
+    assert "--check" in combined
 
 
 def test_tui_app_textual_instantiation() -> None:

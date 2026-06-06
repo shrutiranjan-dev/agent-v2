@@ -36,7 +36,17 @@ jobs:
       - name: Ruff
         run: ruff check backend/app backend/tests
       - name: Pytest
-        run: pytest backend/tests
+        run: |
+          mkdir -p pytest-logs
+          pytest backend/tests --junitxml=pytest-logs/junit.xml 2>&1 | tee pytest-logs/pytest.log
+      - name: Upload pytest log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-pytest-log
+          path: pytest-logs/
+          if-no-files-found: ignore
+          retention-days: 7
 
   frontend:
     name: Frontend
@@ -94,7 +104,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[test]"
       - name: Run migration smoke
-        run: bash scripts/db-migration-smoke.sh
+        run: |
+          mkdir -p migration-logs
+          bash scripts/db-migration-smoke.sh 2>&1 | tee migration-logs/migration.log
+      - name: Upload migration log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: migration-smoke-log
+          path: migration-logs/
+          if-no-files-found: ignore
+          retention-days: 7
 
   safe-smokes:
     name: Safe API Smokes
@@ -164,3 +184,99 @@ jobs:
       - name: Backend logs on failure
         if: failure()
         run: cat /tmp/agent-backend.log || true
+      - name: Upload backend log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: safe-smokes-backend-log
+          path: /tmp/agent-backend.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  cli-tui-smoke:
+    name: CLI/TUI Smoke
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: agent_platform
+          POSTGRES_USER: agent
+          POSTGRES_PASSWORD: agent
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U agent -d agent_platform"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      AP_ENV: test
+      AP_ENABLE_TEST_ENDPOINTS: "true"
+      AP_DATABASE_URL: postgresql+asyncpg://agent:agent@localhost:5432/agent_platform
+      AP_TEST_POSTGRES_URL: postgresql+psycopg://agent:agent@localhost:5432/agent_platform
+      AP_REDIS_PUBSUB_ENABLED: "false"
+      AP_QUEUE_ENABLED: "false"
+      AP_QDRANT_ENABLED: "false"
+      AP_MEMORY_EMBEDDING_ENABLED: "false"
+      AP_OLLAMA_BASE_URL: http://127.0.0.1:9
+      AP_WORKSPACE_ROOT: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[test]"
+      - name: Verify CLI imports (no terminal)
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from backend.app.cli.main import app
+          from backend.app.cli.tui_app import AgentPlatformTuiApp, run_tui_check
+          from backend.app.cli.tui_state import TuiState, apply_event
+          from backend.app.cli.tui_events import TuiEventBridge
+          from backend.app.cli.tui_modals import PermissionModal, HumanInputModal, DiffModal
+          print("cli-tui import smoke ok")
+          PY
+      - name: Verify CLI help lists the --check flag
+        run: |
+          set -euo pipefail
+          python -m backend.app.cli.main --help > /tmp/agent-cli-help.txt
+          python -m backend.app.cli.main tui --help > /tmp/agent-cli-tui-help.txt
+          grep -q -- "--check" /tmp/agent-cli-tui-help.txt
+      - name: Apply migrations
+        run: bash scripts/db-migration-smoke.sh
+      - name: Start backend
+        run: |
+          python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 > /tmp/agent-backend.log 2>&1 &
+          echo $! > /tmp/agent-backend.pid
+          for attempt in {1..60}; do
+            if curl -fsS http://localhost:8000/health >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/agent-backend.log
+          exit 1
+      - name: Run tui --check headless smoke
+        env:
+          AP_CLI_BASE_URL: http://localhost:8000
+          AP_CLI_WS_URL: ws://localhost:8000
+        run: |
+          set -euo pipefail
+          python -m backend.app.cli.main tui --check
+      - name: Backend logs on failure
+        if: failure()
+        run: cat /tmp/agent-backend.log || true
+      - name: Upload backend log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-tui-smoke-backend-log
+          path: /tmp/agent-backend.log
+          if-no-files-found: ignore
+          retention-days: 7

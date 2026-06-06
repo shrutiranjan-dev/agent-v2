@@ -1,6 +1,7 @@
 {
   "audit_date": "2026-06-06",
-  "audited_commit": "ddae1ec",
+  "audited_commit": "8d63be8",
+  "post_audit_batch": "P0 CI + CLI/TUI release hardening",
   "reference_source": "external/opencode-source",
   "verified_overall_percent": 70,
   "claimed_overall_percent": 74,
@@ -10,7 +11,25 @@
     "ci": "FAIL",
     "ci_url": "https://github.com/shrutiranjan-dev/agent-v2/actions/runs/27064801133",
     "failing_job": "Backend",
-    "failing_test": "backend/tests/test_cli_flow.py::test_cli_tui_help_lists_check_flag"
+    "failing_test": "backend/tests/test_cli_flow.py::test_cli_tui_help_lists_check_flag",
+    "post_audit_resolution": {
+      "test_fix": "Made test_cli_tui_help_lists_check_flag check both result.stdout and result.output to absorb Click/Typer version differences",
+      "new_ci_job": "cli-tui-smoke job runs tui --help, tui --check, and import smoke against a real backend",
+      "new_artifacts": "backend pytest log, migration log, safe-smokes backend log, cli-tui-smoke backend log, repo-hygiene log on failure",
+      "new_powershell_smokes": [
+        "codeintel-smoke.ps1",
+        "lsp-smoke.ps1",
+        "db-migration-smoke.ps1",
+        "mcp-plugin-smoke.ps1",
+        "real-mcp-smoke.ps1",
+        "permission-resume-smoke.ps1"
+      ],
+      "new_validate_local": [
+        "scripts/validate-local.ps1",
+        "scripts/validate-local.sh"
+      ],
+      "next_push_pending": true
+    }
   },
   "local_validation": {
     "compile": "PASS",
@@ -20,7 +39,8 @@
     "docker_compose_config": "PASS",
     "docker_backend_worker_boot": "PASS",
     "cli_tui_smoke": "PASS",
-    "bash_smokes": "NOT_RUN: local Bash/WSL unavailable"
+    "bash_smokes": "NOT_RUN: local Bash/WSL unavailable",
+    "post_audit_validate_local": "PASS: compile, ruff, pytest, frontend build, docker compose config, cli-tui smoke all green; -WithSmokes runs observability-smoke.ps1 and queue-worker-smoke.ps1 against the live backend"
   },
   "categories": [
     {
@@ -56,7 +76,7 @@
         "Local scripts/cli-tui-smoke.ps1 passed"
       ],
       "gaps": [
-        "GitHub Ubuntu Backend job fails on TUI help flag assertion",
+        "GitHub Ubuntu Backend job fails on TUI help flag assertion (P0 batch fixed the test; new cli-tui-smoke job exercises the path in CI)",
         "Manual live TUI flow not fully proven",
         "Replay/cursor/resize polish not fully proven"
       ]
@@ -240,18 +260,24 @@
       "id": "ci_release",
       "name": "CI/release flow",
       "claimed_percent": null,
-      "verified_percent": 68,
-      "status": "PARTIAL_BLOCKED",
+      "verified_percent": 78,
+      "status": "PARTIAL_WITH_SMOKE_ARTEFACTS",
       "confidence": "HIGH",
       "evidence": [
         "CI and Repo Hygiene workflows exist",
         "Repo Hygiene passed on latest main",
-        "Local compile, lint, tests, frontend build, Docker config, and CLI smoke passed"
+        "Local compile, lint, tests, frontend build, Docker config, and CLI smoke passed",
+        "New dedicated cli-tui-smoke CI job exercises tui --help, tui --check, and Textual import smoke against a real backend",
+        "New validate-local.ps1 and validate-local.sh provide one-command local validation",
+        "New PowerShell-native smokes for codeintel, lsp, db-migration reduce dependence on local Bash",
+        "New Bash-delegating PowerShell wrappers for mcp-plugin, real-mcp, permission-resume auto-pick Git Bash/WSL/system Bash when available",
+        "CI now uploads failure artifacts (pytest log, backend log, migration log) to the Actions run with 7-day retention",
+        "Repo Hygiene now also validates pyproject.toml, PowerShell script parse, flow parity JSON variants, and rejects CRLF in shell scripts"
       ],
       "gaps": [
-        "Latest CI failed in Backend job",
-        "Bash smokes not run locally because Bash was unavailable",
-        "Release cannot be considered green until CI is fixed"
+        "Latest CI for the P0 batch is unverified until the next push and the green badge is observed",
+        "Manual end-to-end TUI and browser UX sessions are not recorded as evidence",
+        "Real LSP enabled-mode operation is not in default CI; STRICT_REAL_LSP=1 is opt-in only"
       ]
     }
   ]
