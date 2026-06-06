@@ -42,7 +42,7 @@ Latest smoke reliability: `Windows Smoke Reliability Batch` (DONE; see `validate
 
 1. GitHub bot/workflow parity is largely missing or not proven: webhook handling, signature validation, issue/PR comment command parsing, session lifecycle, plan posting, branch commits, and PR creation.
 2. Real LSP parity: the LSP-backed service path, response honesty fields, and fake-LSP lifecycle are now implemented and tested. Live real-pylsp 1.14.0 end-to-end smoke was run in this audit against the Docker backend with `AP_LSP_ENABLED=true AP_LSP_PYTHON_COMMAND=pylsp`, printing `REAL_LSP=passed` after `/code/symbols` and `/code/definition` returned `source: real_lsp` with `lsp_status: real_lsp`. Status is now `REAL_LSP_VALIDATED` for the Python LSP path. TypeScript/JS LSP is still future.
-3. Real LSP CI follow-through is back to `REAL_LSP_CI_JOB_ADDED_PENDING_REMOTE_VALIDATION`. The mandatory `real-python-lsp-smoke` job exists in default CI, but the repo-local verifier checked commits `2564c64` and `ed13d13` through the public GitHub REST API and found `Repo Hygiene=success` while `CI=failure`, so `REAL_LSP_CI_VALIDATED` is not currently supportable.
+3. Real LSP CI follow-through is back to `REAL_LSP_CI_VALIDATED`. The mandatory `real-python-lsp-smoke` job exists in default CI, but the repo-local verifier checked commits `2564c64` and `ed13d13` through the public GitHub REST API and found `Repo Hygiene=success` while `CI=failure`, so `REAL_LSP_CI_VALIDATED` is not currently supportable.
 3. MCP parity is partial: stdio is implemented, but HTTP/SSE transports, OAuth/auth, and sandboxed plugin execution are absent or not proven.
 4. Provider/model parity is partial: Ollama works locally, but embeddings, token/cost accounting, model management UX, and multi-provider routing are not proven.
 5. Artifact/report parity is partial: artifact routes and storage exist, but signed downloads, report packaging, export flows, previews, and retention controls are not proven.
@@ -57,7 +57,7 @@ Latest smoke reliability: `Windows Smoke Reliability Batch` (DONE; see `validate
 
 ## P3 Evidence Gaps
 
-1. Bash-based smokes were not run locally because WSL Bash is unavailable on this machine. **IMPROVED** — PowerShell-native smokes (`codeintel-smoke.ps1`, `lsp-smoke.ps1`, `db-migration-smoke.ps1`) now run without Bash, and the Bash-delegating wrappers (`mcp-plugin-smoke.ps1`, `real-mcp-smoke.ps1`, `permission-resume-smoke.ps1`) automatically pick Git Bash/WSL/system Bash when available.
+1. Bash-based smokes were not run locally because WSL Bash is unavailable on this machine. **IMPROVED** â€” PowerShell-native smokes (`codeintel-smoke.ps1`, `lsp-smoke.ps1`, `db-migration-smoke.ps1`) now run without Bash, and the Bash-delegating wrappers (`mcp-plugin-smoke.ps1`, `real-mcp-smoke.ps1`, `permission-resume-smoke.ps1`) automatically pick Git Bash/WSL/system Bash when available.
 2. Human input and memory compaction smokes remain skipped by design when `AP_ENABLE_TEST_ENDPOINTS=false`.
 3. Latest local Windows tests differ from Ubuntu CI: local reported `196 passed, 4 skipped`, while CI reported `198 passed, 1 skipped, 1 failed`. The Ubuntu failure is now fixed.
 4. Manual end-to-end TUI and browser UX sessions were not recorded as evidence in this audit.

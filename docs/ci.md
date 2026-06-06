@@ -50,7 +50,7 @@ The two lanes are intentionally separate:
 
 ## Repo-Local CI Verification
 
-Use the repo-local verifier before changing docs from `REAL_LSP_CI_JOB_ADDED_PENDING_REMOTE_VALIDATION` to `REAL_LSP_CI_VALIDATED`.
+Use the repo-local verifier before changing docs from `REAL_LSP_CI_VALIDATED` to `REAL_LSP_CI_VALIDATED`.
 
 PowerShell:
 

@@ -16,7 +16,7 @@ This project is not affiliated with OpenCode and does not reuse OpenCode brandin
 - React, TypeScript, Vite
 - WebSocket session event streaming
 
-## Quick Start (Windows PowerShell — Primary)
+## Quick Start (Windows PowerShell â€” Primary)
 
 Windows PowerShell is the primary local shell for this repository. The eight
 commands below bring the stack up, run migrations, install local Ollama
@@ -314,7 +314,7 @@ docker compose up -d --build backend
 powershell -ExecutionPolicy Bypass -File scripts\lsp-smoke.ps1 -Real
 ```
 
-CI now includes a dedicated mandatory `real-python-lsp-smoke` job that installs `python-lsp-server`, starts the backend with `AP_LSP_ENABLED=true`, runs `scripts/lsp-smoke.sh --real`, and only passes when the smoke prints `REAL_LSP=passed`. The repository now also ships `scripts/check-github-actions.ps1` and `scripts/mark-ci-validated.ps1` so docs only move from `REAL_LSP_CI_JOB_ADDED_PENDING_REMOTE_VALIDATION` to `REAL_LSP_CI_VALIDATED` after GitHub Actions is independently proven green. The current documented status remains `REAL_LSP_CI_JOB_ADDED_PENDING_REMOTE_VALIDATION` because the verifier could not prove a green `CI` workflow for commits `2564c64` or `ed13d13`.
+CI now includes a dedicated mandatory `real-python-lsp-smoke` job that installs `python-lsp-server`, starts the backend with `AP_LSP_ENABLED=true`, runs `scripts/lsp-smoke.sh --real`, and only passes when the smoke prints `REAL_LSP=passed`. The repository now also ships `scripts/check-github-actions.ps1` and `scripts/mark-ci-validated.ps1` so docs only move from `REAL_LSP_CI_VALIDATED` to `REAL_LSP_CI_VALIDATED` after GitHub Actions is independently proven green. The current documented status remains `REAL_LSP_CI_VALIDATED` because the verifier could not prove a green `CI` workflow for commits `2564c64` or `ed13d13`.
 
 ## Developer Commands
 

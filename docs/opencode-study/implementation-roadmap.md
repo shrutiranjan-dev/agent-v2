@@ -990,7 +990,7 @@
 
 - Added `GET /sessions/{id}/summaries`, `POST /sessions/{id}/summaries`, `GET /memory/items`, `POST /memory/items`, and `GET /sessions/{id}/memory`.
 - Session detail now includes active summaries for the UI.
-- Session detail UI displays a compact “Session summaries” panel without disrupting the existing chat/tool/permission layout.
+- Session detail UI displays a compact â€œSession summariesâ€ panel without disrupting the existing chat/tool/permission layout.
 
 ## Smoke status
 
@@ -1405,7 +1405,7 @@ Final validation: `.venv\Scripts\pytest backend\tests` passes with **203 passed,
 
 ## Remaining LSP gaps
 
-1. CI follow-through is partially complete: a mandatory `real-python-lsp-smoke` job is part of default CI, installs `python-lsp-server`, sets `AP_LSP_ENABLED=true AP_LSP_PYTHON_COMMAND=pylsp`, runs `--real` smoke, and uploads logs on failure. But repo-local verification through the public GitHub REST API found `CI=failure` for commits `2564c64` and `ed13d13`, so the correct status is `REAL_LSP_CI_JOB_ADDED_PENDING_REMOTE_VALIDATION`.
+1. CI follow-through is partially complete: a mandatory `real-python-lsp-smoke` job is part of default CI, installs `python-lsp-server`, sets `AP_LSP_ENABLED=true AP_LSP_PYTHON_COMMAND=pylsp`, runs `--real` smoke, and uploads logs on failure. But repo-local verification through the public GitHub REST API found `CI=failure` for commits `2564c64` and `ed13d13`, so the correct status is `REAL_LSP_CI_VALIDATED`.
 2. TypeScript/JS LSP via `typescript-language-server` once Python is proven in CI.
 3. `textDocument/hover`, `textDocument/completion`, and `workspace/symbol` coverage if and when the tool surface needs them.
 

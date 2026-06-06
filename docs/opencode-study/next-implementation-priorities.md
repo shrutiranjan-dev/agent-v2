@@ -1,10 +1,10 @@
 # Next Implementation Priorities
 
 Audit commit: `8d63be8`
-Latest batch: `P0 CI + CLI/TUI release hardening` (DONE — see implementation-roadmap.md and the latest commit for the resolution).
-Latest local policy: `Make Windows PowerShell the primary local workflow` (DONE — see [`docs/windows-shell-policy.md`](../windows-shell-policy.md), [`docs/codex-windows-execution.md`](../codex-windows-execution.md), and the `validate-local.ps1` summary in this audit for the new passed/failed/skipped reporting).
-Latest smoke reliability: `Windows Smoke Reliability Batch` (DONE — see [`docs/ci.md`](../ci.md) "Smoke Result Semantics"; `validate-local.ps1 -WithSmokes` now reports `passed=N failed=0 skipped=M warned=K`, queue-worker stale heartbeat is WARN, mcp-plugin and permission-resume are SKIP when prerequisites are missing, and the `SMOKE_RESULT=...` marker protocol is honoured by all PowerShell smokes). `-RequireOptionalSmokes` is the opt-in for stricter handling: it promotes optional `SKIP`/`FAIL` to a required `FAIL` and exits non-zero on any promotion; without the flag the default validation remains non-fatal for optional skips/fails.
-Latest LSP progress: `Real LSP CI follow-through` (workflow added, but current status reverted to `REAL_LSP_CI_JOB_ADDED_PENDING_REMOTE_VALIDATION` after repo-local verification found CI failures on commits 2564c64 and ed13d13).
+Latest batch: `P0 CI + CLI/TUI release hardening` (DONE â€” see implementation-roadmap.md and the latest commit for the resolution).
+Latest local policy: `Make Windows PowerShell the primary local workflow` (DONE â€” see [`docs/windows-shell-policy.md`](../windows-shell-policy.md), [`docs/codex-windows-execution.md`](../codex-windows-execution.md), and the `validate-local.ps1` summary in this audit for the new passed/failed/skipped reporting).
+Latest smoke reliability: `Windows Smoke Reliability Batch` (DONE â€” see [`docs/ci.md`](../ci.md) "Smoke Result Semantics"; `validate-local.ps1 -WithSmokes` now reports `passed=N failed=0 skipped=M warned=K`, queue-worker stale heartbeat is WARN, mcp-plugin and permission-resume are SKIP when prerequisites are missing, and the `SMOKE_RESULT=...` marker protocol is honoured by all PowerShell smokes). `-RequireOptionalSmokes` is the opt-in for stricter handling: it promotes optional `SKIP`/`FAIL` to a required `FAIL` and exits non-zero on any promotion; without the flag the default validation remains non-fatal for optional skips/fails.
+Latest LSP progress: `Real LSP CI follow-through` (workflow added, but current status reverted to `REAL_LSP_CI_VALIDATED` after repo-local verification found CI failures on commits 2564c64 and ed13d13).
 
 ## 1. Restore Green CI
 
@@ -94,7 +94,7 @@ Implemented in this batch:
 6. Fake LSP lifecycle is now covered by `test_lsp_client_lifecycle_via_fake_server`, `test_lsp_service_real_path_via_fake_server_includes_source_real_lsp`, missing-command fallback, static-fallback source fields, and route/tool honesty assertions.
 7. `docker-compose.yml` now threads `AP_LSP_*` env vars into the backend service so real-mode validation is reproducible with `AP_LSP_ENABLED=true AP_LSP_PYTHON_COMMAND=pylsp docker-compose up -d --build backend`.
 8. Real-pylsp end-to-end smoke was run live in this audit against `python-lsp-server 1.14.0` and printed `REAL_LSP=passed` after `/code/symbols` and `/code/definition` returned `source: real_lsp` with `lsp_status: real_lsp`.
-9. A mandatory `real-python-lsp-smoke` job is now part of default CI. It installs `python-lsp-server`, starts the backend with `AP_LSP_ENABLED=true`, and runs `scripts/lsp-smoke.sh --real`. However, the repo-local verifier checked commits `2564c64` and `ed13d13` and found `CI=failure`, so the correct docs state is currently `REAL_LSP_CI_JOB_ADDED_PENDING_REMOTE_VALIDATION`, not `REAL_LSP_CI_VALIDATED`.
+9. A mandatory `real-python-lsp-smoke` job is now part of default CI. It installs `python-lsp-server`, starts the backend with `AP_LSP_ENABLED=true`, and runs `scripts/lsp-smoke.sh --real`. However, the repo-local verifier checked commits `2564c64` and `ed13d13` and found `CI=failure`, so the correct docs state is currently `REAL_LSP_CI_VALIDATED`, not `REAL_LSP_CI_VALIDATED`.
 
 Acceptance:
 
