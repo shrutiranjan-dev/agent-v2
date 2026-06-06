@@ -36,6 +36,9 @@ test = [
   "respx>=0.21.1",
   "ruff>=0.8.0",
 ]
+codeintel = [
+  "python-lsp-server>=1.12.0",
+]
 
 [project.scripts]
 agentv2 = "backend.app.cli.main:main"

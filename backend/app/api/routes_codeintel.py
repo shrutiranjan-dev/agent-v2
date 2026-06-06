@@ -89,7 +89,7 @@ async def list_code_symbols(
 ) -> dict[str, Any]:
     runtime_tenant = await ensure_runtime_tenant(db, tenant)
     if file:
-        rows = await lsp_service.document_symbols(
+        result = await lsp_service.document_symbols(
             db,
             workspace_id=runtime_tenant.workspace_id,
             file_path=file,
@@ -98,17 +98,29 @@ async def list_code_symbols(
             language=language,
             limit=limit,
         )
-    else:
-        rows = await codeintel_repository.find_symbols(
-            db,
-            workspace_id=runtime_tenant.workspace_id,
-            query=query,
-            file_path=file,
-            kind=kind,
-            language=language,
-            limit=limit,
-        )
-    return {"symbols": rows}
+        return {
+            "symbols": result.items,
+            "source": result.source,
+            "lsp_status": result.lsp_status,
+            "fallback_reason": result.fallback_reason,
+            "lsp": result.lsp,
+        }
+    rows = await codeintel_repository.find_symbols(
+        db,
+        workspace_id=runtime_tenant.workspace_id,
+        query=query,
+        file_path=file,
+        kind=kind,
+        language=language,
+        limit=limit,
+    )
+    return {
+        "symbols": rows,
+        "source": "static_fallback",
+        "lsp_status": lsp_service.status().get("mode", "static_fallback"),
+        "fallback_reason": "File-scoped LSP requires a file path; static index used.",
+        "lsp": lsp_service.status(),
+    }
 
 
 @router.get("/code/definition")
@@ -123,7 +135,7 @@ async def code_definition(
     runtime_tenant = await ensure_runtime_tenant(db, tenant)
     if not name and not (file and line):
         raise HTTPException(status_code=422, detail="Provide either name or file+line.")
-    definition = await lsp_service.goto_definition(
+    result = await lsp_service.goto_definition(
         db,
         workspace_id=runtime_tenant.workspace_id,
         name=name,
@@ -131,7 +143,13 @@ async def code_definition(
         line=line,
         column=column,
     )
-    return {"definition": definition, "lsp": lsp_service.status()}
+    return {
+        "definition": result.items,
+        "source": result.source,
+        "lsp_status": result.lsp_status,
+        "fallback_reason": result.fallback_reason,
+        "lsp": result.lsp,
+    }
 
 
 @router.get("/code/references")
@@ -148,7 +166,7 @@ async def code_references(
     runtime_tenant = await ensure_runtime_tenant(db, tenant)
     if not name and not symbol_id and not (file and line):
         raise HTTPException(status_code=422, detail="Provide name, symbol_id, or file+line.")
-    references = await lsp_service.find_references(
+    result = await lsp_service.find_references(
         db,
         workspace_id=runtime_tenant.workspace_id,
         name=name,
@@ -158,7 +176,13 @@ async def code_references(
         column=column,
         limit=limit,
     )
-    return {"references": references, "lsp": lsp_service.status()}
+    return {
+        "references": result.items,
+        "source": result.source,
+        "lsp_status": result.lsp_status,
+        "fallback_reason": result.fallback_reason,
+        "lsp": result.lsp,
+    }
 
 
 @router.get("/code/diagnostics")
@@ -170,14 +194,20 @@ async def code_diagnostics(
     tenant: TenantContext = Depends(tenant_context),
 ) -> dict[str, Any]:
     runtime_tenant = await ensure_runtime_tenant(db, tenant)
-    diagnostics = await lsp_service.get_diagnostics(
+    result = await lsp_service.get_diagnostics(
         db,
         workspace_id=runtime_tenant.workspace_id,
         file_path=file,
         severity=severity,
         limit=limit,
     )
-    return {"diagnostics": diagnostics}
+    return {
+        "diagnostics": result.items,
+        "source": result.source,
+        "lsp_status": result.lsp_status,
+        "fallback_reason": result.fallback_reason,
+        "lsp": result.lsp,
+    }
 
 
 @router.get("/code/map")

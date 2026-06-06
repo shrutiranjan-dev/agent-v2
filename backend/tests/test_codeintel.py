@@ -22,6 +22,7 @@ from backend.app.codeintel.lsp_service import lsp_service
 from backend.app.codeintel.parser import parse_code
 from backend.app.codeintel.repository import codeintel_repository
 from backend.app.db.models import CodeDiagnostic, CodeFile, CodeReference, CodeSymbol
+from backend.app.db.postgres import get_session
 from backend.app.main import create_app
 from backend.app.runtime.context_builder import context_builder
 from backend.app.runtime.tool_executor import ToolExecutor
@@ -253,7 +254,9 @@ async def test_lsp_request_timeout_falls_back(monkeypatch, tmp_path) -> None:
     )
     await lsp_service.shutdown()
 
-    assert result == []
+    assert result.items == []
+    assert result.source == "static_fallback"
+    assert result.fallback_reason is not None
     assert lsp_service.status()["mode"] == "failed"
 
 
@@ -305,12 +308,17 @@ async def test_lsp_fake_server_definition_references_and_diagnostics(monkeypatch
     )
     await lsp_service.shutdown()
 
-    assert definition is not None
-    assert definition["file_path"] == "service.py"
-    assert references[0]["file_path"] == "service.py"
-    assert diagnostics[0]["severity"] == "warning"
-    assert symbols[0]["name"] == "Service"
+    assert definition.items is not None
+    assert definition.items["file_path"] == "service.py"
+    assert references.items[0]["file_path"] == "service.py"
+    assert diagnostics.items[0]["severity"] == "warning"
+    assert symbols.items[0]["name"] == "Service"
     assert lsp_service.status()["mode"] in {"real_lsp", "failed"}
+    if lsp_service.status()["mode"] == "real_lsp":
+        assert definition.source == "real_lsp"
+        assert references.source == "real_lsp"
+        assert symbols.source == "real_lsp"
+        assert diagnostics.source == "real_lsp"
 
 
 async def test_lsp_static_fallback_definition_and_references(monkeypatch, tmp_path) -> None:
@@ -345,9 +353,11 @@ async def test_lsp_static_fallback_definition_and_references(monkeypatch, tmp_pa
     definition = await lsp_service.goto_definition(db, workspace_id=file.workspace_id, name="Service")
     references = await lsp_service.find_references(db, workspace_id=file.workspace_id, name="Service")
 
-    assert definition is not None
-    assert definition["name"] == "Service"
-    assert references[0]["snippet"] == "Service()"
+    assert definition.items is not None
+    assert definition.items["name"] == "Service"
+    assert references.items[0]["snippet"] == "Service()"
+    assert definition.source == "static_fallback"
+    assert references.source == "static_fallback"
     assert lsp_service.status()["mode"] == "static_fallback"
 
 
@@ -398,7 +408,7 @@ async def test_codeintel_tools_registered_and_execute_with_tool_executor(monkeyp
         metadata_json={},
     )
     db = FakeAsyncSession(messages=[message], objects=[session, file, symbol])
-    settings = codeintel_test_settings(tmp_path)
+    settings = codeintel_test_settings(tmp_path, lsp_enabled=False)
     patch_codeintel_settings(monkeypatch, settings)
 
     assert {"code.index", "code.symbols", "code.definition", "code.references", "code.diagnostics", "code.map"} <= set(
@@ -420,6 +430,9 @@ async def test_codeintel_tools_registered_and_execute_with_tool_executor(monkeyp
     assert outcome.status == "completed"
     assert outcome.output is not None
     assert outcome.output["output"]["symbols"][0]["name"] == "Service"
+    assert outcome.output["output"]["source"] == "static_fallback"
+    assert outcome.output["output"]["lsp_status"] == "static_fallback"
+    assert "fallback_reason" in outcome.output["output"]
 
 
 async def test_codeintel_tools_direct_definition(monkeypatch, tmp_path) -> None:
@@ -454,7 +467,11 @@ async def test_codeintel_tools_direct_definition(monkeypatch, tmp_path) -> None:
     definition = await CodeDefinitionTool().run(CodeDefinitionTool.input_model(name="Service"), ctx)  # type: ignore[arg-type]
 
     assert symbols.output["count"] == 1
+    assert symbols.output["source"] == "static_fallback"
+    assert symbols.output["lsp_status"] == "static_fallback"
     assert definition.output["definition"]["name"] == "Service"
+    assert definition.output["source"] == "static_fallback"
+    assert definition.output["lsp_status"] == "static_fallback"
 
 
 async def test_context_builder_includes_code_map_symbols_and_diagnostics(monkeypatch, tmp_path) -> None:
@@ -504,3 +521,201 @@ def test_codeintel_routes_are_in_openapi() -> None:
     assert "/code/diagnostics" in paths
     assert "/code/map" in paths
     assert "/health/codeintel" in paths
+
+
+async def test_lsp_client_lifecycle_via_fake_server(monkeypatch, tmp_path) -> None:
+    source = tmp_path / "service.py"
+    source.write_text("class Service:\n    pass\n", encoding="utf-8")
+    settings = codeintel_test_settings(tmp_path, lsp_enabled=True, startup_timeout=5, request_timeout=5)
+    settings.lsp.python_command = sys.executable
+    patch_codeintel_settings(monkeypatch, settings)
+
+    original_exec = asyncio.create_subprocess_exec
+
+    async def patched_exec(*args, **kwargs):
+        return await original_exec(sys.executable, str(FAKE_LSP_SERVER), *args[1:], **kwargs)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", patched_exec)
+    await lsp_client.initialize(tmp_path)
+    capabilities = await lsp_client.initialize(tmp_path)
+    assert isinstance(capabilities, dict)
+    symbols = await lsp_client.document_symbols(source)
+    assert isinstance(symbols, list)
+    await lsp_client.shutdown()
+    assert lsp_client._is_running() is False
+
+
+async def test_lsp_health_started_alias_matches_started_at() -> None:
+    snapshot = lsp_service.status()
+    assert "started" in snapshot
+    assert "started_at" in snapshot
+    assert snapshot["started"] == snapshot["started_at"]
+
+
+async def test_lsp_service_static_fallback_includes_source_fields(monkeypatch, tmp_path) -> None:
+    settings = codeintel_test_settings(tmp_path, lsp_enabled=False)
+    patch_codeintel_settings(monkeypatch, settings)
+    file = code_file("service.py")
+    symbol = CodeSymbol(
+        id=uuid4(),
+        code_file_id=file.id,
+        workspace_id=file.workspace_id,
+        name="Service",
+        kind="class",
+        language="python",
+        start_line=1,
+        metadata_json={},
+    )
+    db = FakeAsyncSession(objects=[file, symbol])
+
+    result = await lsp_service.document_symbols(
+        db,
+        workspace_id=file.workspace_id,
+        file_path="service.py",
+        limit=10,
+    )
+
+    assert result.source == "static_fallback"
+    assert result.lsp_status == "static_fallback"
+    assert result.fallback_reason is not None
+    assert isinstance(result.lsp, dict)
+    assert "started" in result.lsp
+
+
+async def test_lsp_service_missing_command_falls_back_to_static(monkeypatch, tmp_path) -> None:
+    settings = codeintel_test_settings(tmp_path, lsp_enabled=True, lsp_command="definitely-not-installed-pylsp")
+    patch_codeintel_settings(monkeypatch, settings)
+    file = code_file("service.py")
+    symbol = CodeSymbol(
+        id=uuid4(),
+        code_file_id=file.id,
+        workspace_id=file.workspace_id,
+        name="Service",
+        kind="class",
+        language="python",
+        start_line=1,
+        metadata_json={},
+    )
+    db = FakeAsyncSession(objects=[file, symbol])
+
+    result = await lsp_service.document_symbols(
+        db,
+        workspace_id=file.workspace_id,
+        file_path="service.py",
+        limit=10,
+    )
+
+    assert result.source == "static_fallback"
+    assert result.lsp_status == "failed"
+    assert result.fallback_reason is not None
+
+
+async def test_lsp_service_real_path_via_fake_server_includes_source_real_lsp(
+    monkeypatch, tmp_path
+) -> None:
+    source = tmp_path / "service.py"
+    source.write_text("class Service:\n    pass\n", encoding="utf-8")
+    settings = codeintel_test_settings(tmp_path, lsp_enabled=True, startup_timeout=5, request_timeout=5)
+    settings.lsp.python_command = sys.executable
+    patch_codeintel_settings(monkeypatch, settings)
+
+    original_exec = asyncio.create_subprocess_exec
+
+    async def patched_exec(*args, **kwargs):
+        return await original_exec(sys.executable, str(FAKE_LSP_SERVER), *args[1:], **kwargs)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", patched_exec)
+
+    result = await lsp_service.document_symbols(
+        FakeAsyncSession(),
+        workspace_id=uuid4(),
+        file_path="service.py",
+        limit=20,
+    )
+    await lsp_service.shutdown()
+
+    assert result.source in {"real_lsp", "static_fallback"}
+    assert result.lsp_status in {"real_lsp", "failed"}
+    if result.source == "real_lsp":
+        assert result.fallback_reason is None
+
+
+async def test_codeintel_routes_include_source_field(monkeypatch, tmp_path) -> None:
+    settings = codeintel_test_settings(tmp_path, lsp_enabled=False)
+    patch_codeintel_settings(monkeypatch, settings)
+    file = code_file("service.py")
+    symbol = CodeSymbol(
+        id=uuid4(),
+        code_file_id=file.id,
+        workspace_id=file.workspace_id,
+        name="Service",
+        kind="class",
+        language="python",
+        start_line=1,
+        metadata_json={},
+    )
+    reference = CodeReference(
+        id=uuid4(),
+        symbol_id=symbol.id,
+        code_file_id=file.id,
+        reference_name="Service",
+        reference_type="reference",
+        line=4,
+        column=2,
+        snippet="Service()",
+        metadata_json={},
+    )
+    db_session = FakeAsyncSession(objects=[file, symbol, reference])
+    app = create_app()
+    app.dependency_overrides[get_session] = lambda: db_session
+
+    from backend.app.api import routes_codeintel
+    from backend.app.runtime.tenant import RuntimeTenant
+
+    runtime_tenant = RuntimeTenant(
+        organization_id=uuid4(),
+        project_id=uuid4(),
+        workspace_id=file.workspace_id,
+        user_id=uuid4(),
+    )
+
+    async def fake_ensure_runtime_tenant(db, tenant):  # noqa: ARG001
+        return runtime_tenant
+
+    monkeypatch.setattr(routes_codeintel, "ensure_runtime_tenant", fake_ensure_runtime_tenant)
+
+    with TestClient(app) as client:
+        symbols_resp = client.get("/code/symbols?file=service.py&limit=10")
+        definition_resp = client.get("/code/definition?name=Service")
+        references_resp = client.get("/code/references?name=Service")
+        diagnostics_resp = client.get("/code/diagnostics?file=service.py&limit=10")
+        health_resp = client.get("/health/codeintel")
+
+    assert symbols_resp.status_code == 200
+    body = symbols_resp.json()
+    assert body["source"] == "static_fallback"
+    assert body["lsp_status"] == "static_fallback"
+    assert "fallback_reason" in body
+    assert "lsp" in body
+
+    assert definition_resp.status_code == 200
+    body = definition_resp.json()
+    assert body["source"] == "static_fallback"
+    assert body["lsp_status"] == "static_fallback"
+    assert "fallback_reason" in body
+
+    assert references_resp.status_code == 200
+    body = references_resp.json()
+    assert body["source"] == "static_fallback"
+    assert "fallback_reason" in body
+
+    assert diagnostics_resp.status_code == 200
+    body = diagnostics_resp.json()
+    assert body["source"] == "static_fallback"
+    assert "fallback_reason" in body
+
+    assert health_resp.status_code == 200
+    body = health_resp.json()
+    assert "lsp" in body
+    assert "started" in body["lsp"]
+    assert "started_at" in body["lsp"]

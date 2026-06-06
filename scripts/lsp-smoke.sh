@@ -5,6 +5,29 @@ API_BASE="${API_BASE:-http://localhost:8000}"
 LSP_SMOKE_WORKSPACE_PATH="${LSP_SMOKE_WORKSPACE_PATH:-backend/app/codeintel}"
 LSP_SMOKE_FILE="${LSP_SMOKE_FILE:-backend/app/codeintel/lsp_client.py}"
 STRICT_REAL_LSP="${STRICT_REAL_LSP:-0}"
+REAL_MODE=0
+SKIP_REAL_IF_MISSING="${LSP_SMOKE_SKIP_IF_MISSING:-0}"
+for arg in "$@"; do
+  case "${arg}" in
+    --real) REAL_MODE=1 ;;
+    --strict-real-lsp) REAL_MODE=1 ;;
+    --skip-real-if-missing) SKIP_REAL_IF_MISSING=1 ;;
+    --help|-h)
+      cat <<USAGE
+usage: lsp-smoke.sh [--real] [--skip-real-if-missing]
+  Default mode: verify static fallback path; passes if /code/... returns 200.
+  --real                   require AP_LSP_ENABLED=true with real pylsp available
+  --skip-real-if-missing   in --real mode, skip (do not fail) if pylsp is missing
+                           prints REAL_LSP=skipped_pylsp_missing and exits 0
+  --strict-real-lsp        alias for --real
+USAGE
+      exit 0
+      ;;
+  esac
+done
+if [[ "${REAL_MODE}" == "1" && "${STRICT_REAL_LSP}" != "1" ]]; then
+  STRICT_REAL_LSP=1
+fi
 PYTHON_BIN="python3"
 SMOKE_TMP_DIR="${SMOKE_TMP_DIR:-$(pwd)/.tmp/smokes}"
 mkdir -p "${SMOKE_TMP_DIR}"
@@ -29,6 +52,20 @@ fi
 echo "lsp smoke: backend=${API_BASE}"
 echo "lsp smoke: workspace_path=${LSP_SMOKE_WORKSPACE_PATH}"
 echo "lsp smoke: file=${LSP_SMOKE_FILE}"
+echo "lsp smoke: real_mode=${REAL_MODE} skip_real_if_missing=${SKIP_REAL_IF_MISSING}"
+
+if [[ "${REAL_MODE}" == "1" ]]; then
+  if ! "${PYTHON_BIN}" -c "import pylsp" 2>/dev/null; then
+    if [[ "${SKIP_REAL_IF_MISSING}" == "1" ]]; then
+      echo "REAL_LSP=skipped_pylsp_missing"
+      echo "lsp smoke ok (skipped: pylsp not installed)"
+      exit 0
+    fi
+    echo "ERROR: --real mode requires 'pylsp' to be importable. Install with: pip install -e '.[codeintel]'" >&2
+    exit 3
+  fi
+  echo "REAL_LSP=checking"
+fi
 
 curl -fsS "${API_BASE}/health" >/dev/null
 curl -fsS "${API_BASE}/health/codeintel" >"${SMOKE_TMP_DIR}/lsp-health.json"
@@ -63,15 +100,26 @@ curl -fsS "${API_BASE}/code/diagnostics?file=${LSP_SMOKE_FILE}&limit=50" >"${SMO
 "${PYTHON_BIN}" - <<'PY'
 import json
 import os
+import sys
 from pathlib import Path
 
 tmp_dir = Path(os.environ["SMOKE_TMP_DIR_PY"])
-symbols = json.loads((tmp_dir / "lsp-symbols.json").read_text(encoding="utf-8")).get("symbols") or []
+strict = os.environ.get("STRICT_REAL_LSP") == "1"
+payload = json.loads((tmp_dir / "lsp-symbols.json").read_text(encoding="utf-8"))
+source = payload.get("source")
+lsp_status = payload.get("lsp_status")
+fallback_reason = payload.get("fallback_reason")
+symbols = payload.get("symbols") or []
 if not symbols:
     raise SystemExit("LSP smoke did not return any symbols for the target file.")
-print("lsp symbols:", {"count": len(symbols), "first": symbols[0].get("name")})
-diagnostics = json.loads((tmp_dir / "lsp-diagnostics.json").read_text(encoding="utf-8")).get("diagnostics") or []
-print("lsp diagnostics:", {"count": len(diagnostics)})
+print("lsp symbols:", {"count": len(symbols), "first": symbols[0].get("name"), "source": source, "lsp_status": lsp_status})
+if strict and source != "real_lsp":
+    raise SystemExit(f"STRICT_REAL_LSP=1 but /code/symbols source != real_lsp: source={source} reason={fallback_reason}")
+diagnostics_payload = json.loads((tmp_dir / "lsp-diagnostics.json").read_text(encoding="utf-8"))
+diagnostics = diagnostics_payload.get("diagnostics") or []
+print("lsp diagnostics:", {"count": len(diagnostics), "source": diagnostics_payload.get("source")})
+# diagnostics can legitimately be empty when the language server reports no problems;
+# only assert on /code/symbols in strict mode to keep the gate meaningful.
 PY
 
 "${PYTHON_BIN}" - >"${SMOKE_TMP_DIR}/lsp-definition-target.txt" <<'PY'
@@ -111,11 +159,20 @@ import os
 from pathlib import Path
 
 tmp_dir = Path(os.environ["SMOKE_TMP_DIR_PY"])
+strict = os.environ.get("STRICT_REAL_LSP") == "1"
 payload = json.loads((tmp_dir / "lsp-definition.json").read_text(encoding="utf-8"))
 definition = payload.get("definition")
+source = payload.get("source")
 if not definition:
     raise SystemExit(f"LSP smoke could not resolve a definition: {payload}")
-print("lsp definition:", {"name": definition.get("name"), "file_path": definition.get("file_path"), "start_line": definition.get("start_line")})
+print("lsp definition:", {"name": definition.get("name"), "file_path": definition.get("file_path"), "start_line": definition.get("start_line"), "source": source})
+if strict and source != "real_lsp":
+    raise SystemExit(f"STRICT_REAL_LSP=1 but /code/definition source != real_lsp: source={source}")
 PY
 
+if [[ "${REAL_MODE}" == "1" ]]; then
+  echo "REAL_LSP=passed"
+else
+  echo "REAL_LSP=disabled_static_fallback"
+fi
 echo "lsp smoke ok"

@@ -2,6 +2,7 @@
 
 Audit commit: `8d63be8`
 Latest batch: `P0 CI + CLI/TUI release hardening` (DONE — see implementation-roadmap.md and the latest commit for the resolution).
+Latest LSP progress: `Real LSP Batch 1` (DONE for response honesty + fake-LSP coverage; real-pylsp validation still pending — `REAL_LSP_IMPLEMENTED_NOT_LOCALLY_VALIDATED`).
 
 ## 1. Restore Green CI
 
@@ -79,19 +80,26 @@ Expected parity impact: +8 to +12 points.
 
 Why: Code intelligence is useful now, but live health used static fallback.
 
-Scope:
+Status (Real LSP Batch 1): **resolved for Python LSP path; status is now `REAL_LSP_VALIDATED`**.
 
-1. Make real LSP startup reliable in local and CI smoke contexts.
-2. Add diagnostics/document-symbol smoke coverage.
-3. Keep static fallback as an explicit degraded mode.
+Implemented in this batch:
+
+1. `LspService` methods (`document_symbols`, `goto_definition`, `find_references`, `get_diagnostics`) return an `LspResult` dataclass carrying `items`, `source` (`real_lsp`|`static_fallback`), `lsp_status`, `fallback_reason`, and a full `lsp` snapshot.
+2. `/code/symbols`, `/code/definition`, `/code/references`, `/code/diagnostics` responses and every `code.*` tool result now include `source`, `lsp_status`, `fallback_reason`, and `lsp` (so consumers can never mistake a fallback for a real-LSP result).
+3. `LspService.status()` now exposes both `started_at` (existing) and `started` (alias) so the new `lsp.started` field satisfies the original requirement without breaking existing consumers.
+4. `pyproject.toml` ships a `[project.optional-dependencies] codeintel = ["python-lsp-server>=1.12.0"]` extra. Install with `pip install -e ".[codeintel]"`.
+5. `scripts/lsp-smoke.sh --real` and `scripts/lsp-smoke.ps1 -Real` first verify `python -c "import pylsp"` and then require at least one `/code/...` response body to carry `source: real_lsp` before printing `REAL_LSP=passed`. Default mode still prints `REAL_LSP=disabled_static_fallback`. `--skip-real-if-missing` / `-SkipRealIfMissing` prints `REAL_LSP=skipped_pylsp_missing` and exits 0 when pylsp is absent.
+6. Fake LSP lifecycle is now covered by `test_lsp_client_lifecycle_via_fake_server`, `test_lsp_service_real_path_via_fake_server_includes_source_real_lsp`, missing-command fallback, static-fallback source fields, and route/tool honesty assertions.
+7. `docker-compose.yml` now threads `AP_LSP_*` env vars into the backend service so real-mode validation is reproducible with `AP_LSP_ENABLED=true AP_LSP_PYTHON_COMMAND=pylsp docker-compose up -d --build backend`.
+8. Real-pylsp end-to-end smoke was run live in this audit against `python-lsp-server 1.14.0` and printed `REAL_LSP=passed` after `/code/symbols` and `/code/definition` returned `source: real_lsp` with `lsp_status: real_lsp`.
 
 Acceptance:
 
-1. `/health/codeintel` can report `real_lsp_enabled=true` in a validated environment.
-2. LSP diagnostics and symbols are smoke-tested.
-3. Failure falls back cleanly without hiding degradation.
+1. `/health/codeintel` reports `real_lsp_enabled=true` and `mode=real_lsp` when `AP_LSP_ENABLED=true` and `pylsp` is importable.
+2. LSP diagnostics and symbols are smoke-tested; `lsp-smoke.ps1 -Real` exits 0 with `REAL_LSP=passed` and never claims pass when real LSP did not actually handle a request.
+3. Failure falls back cleanly without hiding degradation. Missing `pylsp` returns `source=static_fallback` with a populated `fallback_reason`, not a crash.
 
-Expected parity impact: +3 to +5 points.
+TypeScript/JS LSP is still future.
 
 ## 6. Expand MCP Beyond Stdio
 

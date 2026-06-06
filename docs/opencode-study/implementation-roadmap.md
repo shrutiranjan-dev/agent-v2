@@ -1366,3 +1366,46 @@ The Textual app uses the existing `SessionEventStream` (exponential backoff, con
 - The Textual app's CSS uses theme variables (`$accent`, `$surface`, `$boost`); a future batch could expose a settings file for custom themes.
 - Permission and human-input modals pop on demand but the auto-pop watcher from a live event stream is wired through a single reducer field; a future batch could add a notification bar that surfaces pending requests before the modal pops.
 
+# Real LSP Batch 1 Implementation Result
+
+## Backend service
+
+- `LspService` (`backend/app/codeintel/lsp_service.py`) methods `document_symbols`, `goto_definition`, `find_references`, and `get_diagnostics` now return an `LspResult` dataclass carrying `items`, `source` (`real_lsp` | `static_fallback`), `lsp_status`, `fallback_reason`, and a full `lsp` snapshot. The static-fallback path always sets `source: static_fallback` and a non-null `fallback_reason`. The real-LSP path only sets `source: real_lsp` when the LSP client actually returns data, never when the request fell back mid-call.
+- `LspService.status()` now exposes both `started_at` (preserved) and `started` (alias) so downstream consumers can read either name.
+- `LspClient` (`backend/app/codeintel/lsp_client.py`) is unchanged structurally. The existing stdio JSON-RPC lifecycle (initialize/initialized, request IDs, Content-Length framing, `didOpen`, response size limit, env filtering, workspace-root enforcement, stderr redaction, request / startup / shutdown timeouts) is what the real path exercises.
+
+## Routes and tools
+
+- `backend/app/api/routes_codeintel.py`: every `/code/symbols`, `/code/definition`, `/code/references`, `/code/diagnostics` response now includes `source`, `lsp_status`, `fallback_reason`, and `lsp` alongside the existing `symbols` / `definition` / `references` / `diagnostics` payload. `/health/codeintel` continues to expose `lsp.{real_lsp_enabled, mode, command, last_error, started, started_at, request_count, failure_count}`.
+- `backend/app/tools/codeintel.py`: `code.symbols`, `code.definition`, `code.references`, `code.diagnostics` tool results include `source`, `lsp_status`, `fallback_reason`, and `lsp` in both `output` and `metadata`. Tool responses can never claim real LSP when fallback was used.
+
+## Optional dependency and smokes
+
+- `pyproject.toml` ships a new optional extra: `[project.optional-dependencies] codeintel = ["python-lsp-server>=1.12.0"]`. Install with `pip install -e ".[codeintel]"`. The default runtime does not require `python-lsp-server`; static fallback continues to work without it.
+- `scripts/lsp-smoke.sh` accepts `--real` / `--strict-real-lsp` / `--skip-real-if-missing` and prints `REAL_LSP=disabled_static_fallback` (default), `REAL_LSP=checking` then `REAL_LSP=passed` (real mode, after `source: real_lsp` is observed in a response), or `REAL_LSP=skipped_pylsp_missing` (real mode with skip, when pylsp is not importable).
+- `scripts/lsp-smoke.ps1` mirrors the same with `-Real` / `-SkipRealIfMissing` switches.
+
+## Tests
+
+- New `test_lsp_client_lifecycle_via_fake_server` exercises initialize round-trip, `documentSymbol` mapping, and shutdown against the existing fake LSP server.
+- New `test_lsp_health_started_alias_matches_started_at` asserts both `started` and `started_at` are present and equal.
+- New `test_lsp_service_static_fallback_includes_source_fields` asserts `source=static_fallback`, `lsp_status=static_fallback`, a non-null `fallback_reason`, and a status snapshot with the `started` alias.
+- New `test_lsp_service_missing_command_falls_back_to_static` asserts that a missing `pylsp` command never crashes; it returns `source=static_fallback`, `lsp_status=failed`, and a populated `fallback_reason`.
+- New `test_lsp_service_real_path_via_fake_server_includes_source_real_lsp` asserts that when the fake LSP server handles a request, `source=real_lsp` and `fallback_reason=None`.
+- New `test_codeintel_routes_include_source_field` asserts that the FastAPI route responses for `/code/symbols`, `/code/definition`, `/code/references`, `/code/diagnostics`, and `/health/codeintel` all carry the new honesty fields and the `started` alias.
+- Existing `test_lsp_fake_server_definition_references_and_diagnostics`, `test_lsp_static_fallback_definition_and_references`, and `test_lsp_request_timeout_falls_back` were updated to consume `LspResult` and assert `source` / `lsp_status` / `fallback_reason`.
+- `test_codeintel_tools_registered_and_execute_with_tool_executor` and `test_codeintel_tools_direct_definition` now assert tool `output.source` and `output.lsp_status` are populated and `output.fallback_reason` is present.
+
+Final validation: `.venv\Scripts\pytest backend\tests` passes with **203 passed, 4 skipped** (was 197 + 4 skipped before this batch; the six new tests cover the new honesty surface and the fake-LSP lifecycle). `.venv\Scripts\python -m compileall backend\app` and `.venv\Scripts\python -m ruff check backend\app backend\tests` pass.
+
+## Truthful parity state
+
+- Code Intelligence and LSP: `verified_percent` raised from 76 to 86, status remains `PARTIAL` (TypeScript/JS LSP is still future). Python LSP path is now `REAL_LSP_VALIDATED` after a live real-pylsp 1.14.0 end-to-end smoke in this audit printed `REAL_LSP=passed` for `/code/symbols` and `/code/definition`. The fake LSP server covers protocol-path correctness; the live real-pylsp run proves the integration with a real language server. The two together remove the `REAL_LSP_IMPLEMENTED_NOT_LOCALLY_VALIDATED` flag for Python.
+- TypeScript/JS LSP is still future.
+
+## Remaining LSP gaps
+
+1. CI job (opt-in) that installs `python-lsp-server` in the runner, sets `AP_LSP_ENABLED=true AP_LSP_PYTHON_COMMAND=pylsp`, and runs `-Real` / `--real` smoke, publishing `REAL_LSP=passed` as an artifact. The local machine proves the path; CI needs the same recipe to keep the parity claim honest across pushes.
+2. TypeScript/JS LSP via `typescript-language-server` once Python is proven in CI.
+3. `textDocument/hover`, `textDocument/completion`, and `workspace/symbol` coverage if and when the tool surface needs them.
+

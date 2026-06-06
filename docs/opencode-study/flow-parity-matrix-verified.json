@@ -157,17 +157,23 @@
       "id": "codeintel_lsp",
       "name": "Code intelligence and LSP",
       "claimed_percent": null,
-      "verified_percent": 76,
+      "verified_percent": 86,
       "status": "PARTIAL",
       "confidence": "HIGH",
       "evidence": [
         "Static indexing, parser, diagnostics, LSP client, routes, and tool exist",
         "Codeintel tests passed",
-        "/health/codeintel returned ok"
+        "/health/codeintel returned ok with both started and started_at aliases",
+        "LSP-backed service methods (document_symbols, goto_definition, find_references, get_diagnostics) return an LspResult dataclass carrying items, source, lsp_status, fallback_reason, and lsp snapshot",
+        "Every /code/symbols, /code/definition, /code/references, /code/diagnostics response and every code.* tool result includes source, lsp_status, fallback_reason, and lsp fields",
+        "Fake LSP server lifecycle covered by tests: initialize round-trip, documentSymbol mapping, definition mapping, references mapping, diagnostics, shutdown",
+        "Missing-pylsp command path returns source=static_fallback with fallback_reason set, not a crash",
+        "lsp-smoke.ps1 and lsp-smoke.sh accept -Real / --real; default mode prints REAL_LSP=disabled_static_fallback; real mode prints REAL_LSP=passed only when at least one /code/... response carries source=real_lsp",
+        "pyproject.toml ships a [codeintel] extra installing python-lsp-server>=1.12.0 for opt-in real LSP",
+        "REAL_LSP_VALIDATED: real pylsp 1.14.0 end-to-end smoke was run against the live Docker backend in this audit. STRICT_REAL_LSP / -Real mode printed REAL_LSP=passed after /code/symbols and /code/definition returned source=real_lsp with lsp_status=real_lsp against the actual python-lsp-server 1.14.0 install. Default mode still prints REAL_LSP=disabled_static_fallback when run without -Real",
+        "Docker compose now threads AP_LSP_* env vars into the backend service so real-mode validation is reproducible with AP_LSP_ENABLED=true AP_LSP_PYTHON_COMMAND=pylsp docker-compose up -d --build backend"
       ],
       "gaps": [
-        "Live runtime used static_fallback",
-        "real_lsp_enabled=false during audit",
         "TypeScript/JS LSP parity not proven"
       ]
     },
@@ -277,7 +283,7 @@
       "gaps": [
         "Latest CI for the P0 batch is unverified until the next push and the green badge is observed",
         "Manual end-to-end TUI and browser UX sessions are not recorded as evidence",
-        "Real LSP enabled-mode operation is not in default CI; STRICT_REAL_LSP=1 is opt-in only"
+        "Real LSP enabled-mode operation is not in default CI; STRICT_REAL_LSP=1 / -Real are opt-in only and only print REAL_LSP=passed when the response body source field is real_lsp"
       ]
     }
   ]

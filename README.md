@@ -150,12 +150,30 @@ Behavior:
 - When `AP_LSP_ENABLED=true`, the backend starts a real stdio JSON-RPC language server and uses it for file-based symbols, definitions, references, and diagnostics when the server is available.
 - If the configured server is missing, times out, or fails, health reports the failure and static fallback remains available instead of pretending LSP succeeded.
 
+Every `/code/...` response and every `code.*` tool result now carries these honesty fields so consumers can never mistake a fallback for a real-LSP result:
+
+- `source`: `real_lsp` or `static_fallback`
+- `lsp_status`: current LSP service mode (`real_lsp` / `static_fallback` / `failed`)
+- `fallback_reason`: human-readable reason when the response is from fallback (or `None` for real LSP)
+- `lsp`: full health snapshot including `real_lsp_enabled`, `command`, `started`, `started_at`, `request_count`, `failure_count`
+
 Smoke options:
 
 ```bash
 scripts/codeintel-smoke.sh
-scripts/lsp-smoke.sh
-STRICT_REAL_LSP=1 scripts/lsp-smoke.sh
+scripts/lsp-smoke.sh                       # static fallback smoke (default)
+STRICT_REAL_LSP=1 scripts/lsp-smoke.sh    # require real pylsp + source: real_lsp
+scripts/lsp-smoke.sh --real               # same as STRICT_REAL_LSP=1
+scripts/lsp-smoke.sh --real --skip-real-if-missing
+                                           # REAL_LSP=skipped_pylsp_missing if pylsp absent
+```
+
+Real LSP requires `python-lsp-server`:
+
+```bash
+pip install -e ".[codeintel]"   # installs pylsp
+AP_LSP_ENABLED=true AP_LSP_PYTHON_COMMAND=pylsp \
+  powershell -ExecutionPolicy Bypass -File scripts/lsp-smoke.ps1 -Real
 ```
 
 ## Developer Commands

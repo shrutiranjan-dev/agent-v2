@@ -1017,9 +1017,9 @@
 
 ## Static fallback honesty
 
-- Current improvement: `/health/codeintel` now reports `real_lsp`, `static_fallback`, or `failed` and keeps the indexed database fallback active after command, startup, request, or runtime failures.
-- Why it matters: operators can tell whether semantics are truly coming from a live language server or from the static index.
-- Exact files: `backend/app/codeintel/lsp_service.py`, `backend/app/api/routes_codeintel.py`.
+- Current improvement: `/health/codeintel` now reports `real_lsp`, `static_fallback`, or `failed` and keeps the indexed database fallback active after command, startup, request, or runtime failures. Real LSP Batch 1 added `LspResult` carrying `items`, `source`, `lsp_status`, `fallback_reason`, and a full `lsp` snapshot; every `/code/...` route and every `code.*` tool result now exposes those fields so consumers can never mistake a fallback for a real-LSP result. `LspService.status()` exposes both `started_at` and `started` aliases.
+- Why it matters: operators and tool callers can tell whether semantics are truly coming from a live language server or from the static index.
+- Exact files: `backend/app/codeintel/lsp_service.py`, `backend/app/api/routes_codeintel.py`, `backend/app/tools/codeintel.py`, `backend/tests/test_codeintel.py`.
 - Exact recommended next fix: add frontend wording that distinguishes semantic LSP results from indexed fallback results in the Code panel.
 - Risk if ignored: the backend is honest, but the UI may still leave users guessing which path answered a given request.
 
@@ -1033,11 +1033,11 @@
 
 ## LSP smoke coverage
 
-- Current improvement: added `scripts/lsp-smoke.sh`, which validates the current LSP mode honestly and can require a real server with `STRICT_REAL_LSP=1`.
-- Why it matters: deployment validation now has a dedicated code path for real-LSP lifecycle checks instead of folding everything into the broader codeintel smoke.
-- Exact files: `scripts/lsp-smoke.sh`, `scripts/codeintel-smoke.sh`.
-- Exact recommended next fix: run `scripts/lsp-smoke.sh` in Docker CI twice when feasible, once in fallback mode and once with `AP_LSP_ENABLED=true` and a real `pylsp` install.
-- Risk if ignored: the script exists and local runs are possible, but CI will not automatically prove both fallback and real-LSP startup paths.
+- Current improvement: `scripts/lsp-smoke.sh` and `scripts/lsp-smoke.ps1` now accept `--real` / `-Real`; default mode prints `REAL_LSP=disabled_static_fallback`; real mode prints `REAL_LSP=passed` only after `python -c "import pylsp"` succeeds AND at least one `/code/symbols` (or `/code/definition` / `/code/diagnostics`) response body carries `source: real_lsp`. `--skip-real-if-missing` / `-SkipRealIfMissing` prints `REAL_LSP=skipped_pylsp_missing` and exits 0 when pylsp is absent. The smoke never fakes a pass.
+- Why it matters: deployment validation has a dedicated code path for real-LSP lifecycle checks and is provably honest about whether real LSP actually handled a request.
+- Exact files: `scripts/lsp-smoke.sh`, `scripts/lsp-smoke.ps1`, `scripts/codeintel-smoke.sh`, `pyproject.toml` (`[project.optional-dependencies] codeintel`).
+- Exact recommended next fix: add an opt-in CI job that runs `scripts/lsp-smoke.ps1 -Real` against a runner where `pip install -e ".[codeintel]"` and `AP_LSP_ENABLED=true AP_LSP_PYTHON_COMMAND=pylsp` are configured, so the same `REAL_LSP=passed` gate that worked in the local audit is enforced on every push. The local audit validated the Python path with `python-lsp-server 1.14.0`; CI needs the same recipe.
+- Risk if ignored: local validation proves the path; without the CI job, a future regression in the real-LSP integration could land without detection.
 
 ## Queue and worker dashboard
 

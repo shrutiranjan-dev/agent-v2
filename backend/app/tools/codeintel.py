@@ -115,7 +115,7 @@ class CodeSymbolsTool(CodeIntelTool):
 
     async def run(self, input_data: CodeSymbolsInput, ctx: ToolContext) -> ToolResult:
         if input_data.file:
-            symbols = await lsp_service.document_symbols(
+            result = await lsp_service.document_symbols(
                 self._db(ctx),
                 workspace_id=ctx.workspace_id,
                 file_path=input_data.file,
@@ -124,6 +124,11 @@ class CodeSymbolsTool(CodeIntelTool):
                 language=input_data.language,
                 limit=input_data.limit,
             )
+            symbols = result.items
+            source = result.source
+            lsp_status = result.lsp_status
+            fallback_reason = result.fallback_reason
+            lsp_snapshot = result.lsp
         else:
             symbols = await codeintel_repository.find_symbols(
                 self._db(ctx),
@@ -134,10 +139,26 @@ class CodeSymbolsTool(CodeIntelTool):
                 language=input_data.language,
                 limit=input_data.limit,
             )
+            source = "static_fallback"
+            lsp_status = lsp_service.status().get("mode", "static_fallback")
+            fallback_reason = "File-scoped LSP requires a file path; static index used."
+            lsp_snapshot = lsp_service.status()
         return ToolResult(
             title=f"{len(symbols)} symbol(s)",
-            output={"symbols": symbols, "count": len(symbols)},
-            metadata={"count": len(symbols)},
+            output={
+                "symbols": symbols,
+                "count": len(symbols),
+                "source": source,
+                "lsp_status": lsp_status,
+                "fallback_reason": fallback_reason,
+                "lsp": lsp_snapshot,
+            },
+            metadata={
+                "count": len(symbols),
+                "source": source,
+                "lsp_status": lsp_status,
+                "fallback_reason": fallback_reason,
+            },
         )
 
 
@@ -156,7 +177,7 @@ class CodeDefinitionTool(CodeIntelTool):
                 message="Provide either name or file+line.",
                 recoverable=True,
             )
-        definition = await lsp_service.goto_definition(
+        result = await lsp_service.goto_definition(
             self._db(ctx),
             workspace_id=ctx.workspace_id,
             name=input_data.name,
@@ -165,9 +186,20 @@ class CodeDefinitionTool(CodeIntelTool):
             column=input_data.column,
         )
         return ToolResult(
-            title="Definition found" if definition else "Definition not found",
-            output={"definition": definition},
-            metadata={"found": definition is not None, "lsp_status": lsp_service.status()},
+            title="Definition found" if result.items else "Definition not found",
+            output={
+                "definition": result.items,
+                "source": result.source,
+                "lsp_status": result.lsp_status,
+                "fallback_reason": result.fallback_reason,
+                "lsp": result.lsp,
+            },
+            metadata={
+                "found": result.items is not None,
+                "source": result.source,
+                "lsp_status": result.lsp_status,
+                "fallback_reason": result.fallback_reason,
+            },
         )
 
 
@@ -186,7 +218,7 @@ class CodeReferencesTool(CodeIntelTool):
                 message="Provide name, symbol_id, or file+line.",
                 recoverable=True,
             )
-        references = await lsp_service.find_references(
+        result = await lsp_service.find_references(
             self._db(ctx),
             workspace_id=ctx.workspace_id,
             name=input_data.name,
@@ -196,10 +228,23 @@ class CodeReferencesTool(CodeIntelTool):
             column=input_data.column,
             limit=input_data.limit,
         )
+        references = result.items
         return ToolResult(
             title=f"{len(references)} reference(s)",
-            output={"references": references, "count": len(references)},
-            metadata={"count": len(references), "lsp_status": lsp_service.status()},
+            output={
+                "references": references,
+                "count": len(references),
+                "source": result.source,
+                "lsp_status": result.lsp_status,
+                "fallback_reason": result.fallback_reason,
+                "lsp": result.lsp,
+            },
+            metadata={
+                "count": len(references),
+                "source": result.source,
+                "lsp_status": result.lsp_status,
+                "fallback_reason": result.fallback_reason,
+            },
         )
 
 
@@ -212,17 +257,31 @@ class CodeDiagnosticsTool(CodeIntelTool):
     examples = [{"severity": "error", "limit": 25}, {"file": "backend/app/main.py"}]
 
     async def run(self, input_data: CodeDiagnosticsInput, ctx: ToolContext) -> ToolResult:
-        diagnostics = await lsp_service.get_diagnostics(
+        result = await lsp_service.get_diagnostics(
             self._db(ctx),
             workspace_id=ctx.workspace_id,
             file_path=input_data.file,
             severity=input_data.severity,
             limit=input_data.limit,
         )
+        diagnostics = result.items
         return ToolResult(
             title=f"{len(diagnostics)} diagnostic(s)",
-            output={"diagnostics": diagnostics, "count": len(diagnostics)},
-            metadata={"count": len(diagnostics), "status": diagnostics_service.degraded_status()},
+            output={
+                "diagnostics": diagnostics,
+                "count": len(diagnostics),
+                "source": result.source,
+                "lsp_status": result.lsp_status,
+                "fallback_reason": result.fallback_reason,
+                "lsp": result.lsp,
+            },
+            metadata={
+                "count": len(diagnostics),
+                "source": result.source,
+                "lsp_status": result.lsp_status,
+                "fallback_reason": result.fallback_reason,
+                "status": diagnostics_service.degraded_status(),
+            },
         )
 
 

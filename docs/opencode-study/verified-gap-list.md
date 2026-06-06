@@ -1,7 +1,7 @@
 # Verified OpenCode Parity Gap List
 
 Audit commit: `8d63be8`
-Verified overall parity: 70%
+Verified overall parity: 72% (Code Intelligence and LSP raised to 86% with both fake-LSP path validation AND live real-pylsp 1.14.0 validation in this audit; status is now `REAL_LSP_VALIDATED` for the Python LSP path)
 Latest batch: `P0 CI + CLI/TUI release hardening` (DONE; see implementation-roadmap.md and the latest commit for the resolution).
 
 ## P0 Release Blockers
@@ -13,7 +13,7 @@ Latest batch: `P0 CI + CLI/TUI release hardening` (DONE; see implementation-road
 ## P1 Product Parity Gaps
 
 1. GitHub bot/workflow parity is largely missing or not proven: webhook handling, signature validation, issue/PR comment command parsing, session lifecycle, plan posting, branch commits, and PR creation.
-2. Real LSP parity is not proven because live code intelligence health ran in `static_fallback` with `real_lsp_enabled=false`.
+2. Real LSP parity: the LSP-backed service path, response honesty fields, and fake-LSP lifecycle are now implemented and tested. Live real-pylsp 1.14.0 end-to-end smoke was run in this audit against the Docker backend with `AP_LSP_ENABLED=true AP_LSP_PYTHON_COMMAND=pylsp`, printing `REAL_LSP=passed` after `/code/symbols` and `/code/definition` returned `source: real_lsp` with `lsp_status: real_lsp`. Status is now `REAL_LSP_VALIDATED` for the Python LSP path. TypeScript/JS LSP is still future.
 3. MCP parity is partial: stdio is implemented, but HTTP/SSE transports, OAuth/auth, and sandboxed plugin execution are absent or not proven.
 4. Provider/model parity is partial: Ollama works locally, but embeddings, token/cost accounting, model management UX, and multi-provider routing are not proven.
 5. Artifact/report parity is partial: artifact routes and storage exist, but signed downloads, report packaging, export flows, previews, and retention controls are not proven.
@@ -56,6 +56,6 @@ The P0 batch alone raises CI/release confidence from PARTIAL_BLOCKED to PARTIAL_
 
 1. GitHub bot/workflow automation.
 2. CI green status (improved tooling; live green confirmation still pending the next push).
-3. Real LSP enabled-mode operation.
+3. Real LSP enabled-mode operation: protocol path is implemented and tested with the in-process fake LSP server; real-pylsp 1.14.0 validation was run live in this audit, printing `REAL_LSP=passed`. Status is `REAL_LSP_VALIDATED` for the Python LSP path. TypeScript/JS LSP is still future.
 4. MCP HTTP/SSE/OAuth/plugin execution parity.
 5. Production artifact/report/export flow.

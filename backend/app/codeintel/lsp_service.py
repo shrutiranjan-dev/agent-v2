@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -15,6 +15,9 @@ from backend.app.codeintel.repository import codeintel_repository
 from backend.app.core.config import get_settings
 from backend.app.tools.base import is_inside
 
+SOURCE_REAL_LSP = "real_lsp"
+SOURCE_STATIC_FALLBACK = "static_fallback"
+
 
 @dataclass
 class LspServiceState:
@@ -25,6 +28,15 @@ class LspServiceState:
     started_at: datetime | None = None
     request_count: int = 0
     failure_count: int = 0
+
+
+@dataclass
+class LspResult:
+    items: Any
+    source: str
+    lsp_status: str
+    fallback_reason: str | None = None
+    lsp: dict[str, Any] = field(default_factory=dict)
 
 
 class LspService:
@@ -54,13 +66,15 @@ class LspService:
         return self.status()
 
     def status(self) -> dict[str, Any]:
+        started_iso = self._state.started_at.isoformat() if self._state.started_at else None
         return {
             "status": "ok" if self._state.real_lsp_enabled else "degraded",
             "mode": self._state.mode,
             "real_lsp_enabled": self._state.real_lsp_enabled,
             "command": self._state.command or get_settings().lsp.python_command,
             "last_error": self._state.last_error,
-            "started_at": self._state.started_at.isoformat() if self._state.started_at else None,
+            "started_at": started_iso,
+            "started": started_iso,
             "request_count": self._state.request_count,
             "failure_count": self._state.failure_count,
             "reason": self._state.last_error,
@@ -87,16 +101,22 @@ class LspService:
         kind: str | None = None,
         language: str | None = None,
         limit: int = 200,
-    ) -> list[dict[str, Any]]:
+    ) -> LspResult:
         self._sync_disabled_state()
         if self._should_use_real_lsp():
             try:
                 symbols = await self._document_symbols_real(file_path)
                 self._record_success()
-                return self._filter_symbols(symbols, query=query, kind=kind, language=language, limit=limit)
+                return LspResult(
+                    items=self._filter_symbols(symbols, query=query, kind=kind, language=language, limit=limit),
+                    source=SOURCE_REAL_LSP,
+                    lsp_status=self._state.mode,
+                    fallback_reason=None,
+                    lsp=self.status(),
+                )
             except Exception as exc:
                 self._record_failure(exc)
-        return await codeintel_repository.find_symbols(
+        items = await codeintel_repository.find_symbols(
             db,
             workspace_id=workspace_id,
             query=query,
@@ -104,6 +124,13 @@ class LspService:
             kind=kind,
             language=language,
             limit=limit,
+        )
+        return LspResult(
+            items=items,
+            source=SOURCE_STATIC_FALLBACK,
+            lsp_status=self._state.mode,
+            fallback_reason=self._state.last_error,
+            lsp=self.status(),
         )
 
     async def goto_definition(
@@ -115,7 +142,7 @@ class LspService:
         file: str | None = None,
         line: int | None = None,
         column: int | None = None,
-    ) -> dict[str, Any] | None:
+    ) -> LspResult:
         self._sync_disabled_state()
         if file and line is not None and self._should_use_real_lsp():
             try:
@@ -123,15 +150,28 @@ class LspService:
                 self._record_success()
                 normalized = self._normalize_definition(location)
                 if normalized:
-                    return normalized
+                    return LspResult(
+                        items=normalized,
+                        source=SOURCE_REAL_LSP,
+                        lsp_status=self._state.mode,
+                        fallback_reason=None,
+                        lsp=self.status(),
+                    )
             except Exception as exc:
                 self._record_failure(exc)
-        return await self._fallback_definition(
+        items = await self._fallback_definition(
             db,
             workspace_id=workspace_id,
             name=name,
             file=file,
             line=line,
+        )
+        return LspResult(
+            items=items,
+            source=SOURCE_STATIC_FALLBACK,
+            lsp_status=self._state.mode,
+            fallback_reason=self._state.last_error,
+            lsp=self.status(),
         )
 
     async def find_references(
@@ -145,7 +185,7 @@ class LspService:
         line: int | None = None,
         column: int | None = None,
         limit: int = 100,
-    ) -> list[dict[str, Any]]:
+    ) -> LspResult:
         self._sync_disabled_state()
         if file and line is not None and self._should_use_real_lsp():
             try:
@@ -153,15 +193,28 @@ class LspService:
                 self._record_success()
                 normalized = self._normalize_references(locations)
                 if normalized:
-                    return normalized[:limit]
+                    return LspResult(
+                        items=normalized[:limit],
+                        source=SOURCE_REAL_LSP,
+                        lsp_status=self._state.mode,
+                        fallback_reason=None,
+                        lsp=self.status(),
+                    )
             except Exception as exc:
                 self._record_failure(exc)
-        return await codeintel_repository.find_references(
+        items = await codeintel_repository.find_references(
             db,
             workspace_id=workspace_id,
             name=name,
             symbol_id=symbol_id,
             limit=limit,
+        )
+        return LspResult(
+            items=items,
+            source=SOURCE_STATIC_FALLBACK,
+            lsp_status=self._state.mode,
+            fallback_reason=self._state.last_error,
+            lsp=self.status(),
         )
 
     async def get_diagnostics(
@@ -172,7 +225,7 @@ class LspService:
         file_path: str | None = None,
         severity: str | None = None,
         limit: int = 100,
-    ) -> list[dict[str, Any]]:
+    ) -> LspResult:
         self._sync_disabled_state()
         if file_path and self._should_use_real_lsp():
             try:
@@ -180,15 +233,28 @@ class LspService:
                 self._record_success()
                 normalized = self._normalize_diagnostics(diagnostics, file_path=file_path)
                 if normalized:
-                    return self._filter_diagnostics(normalized, severity=severity, limit=limit)
+                    return LspResult(
+                        items=self._filter_diagnostics(normalized, severity=severity, limit=limit),
+                        source=SOURCE_REAL_LSP,
+                        lsp_status=self._state.mode,
+                        fallback_reason=None,
+                        lsp=self.status(),
+                    )
             except Exception as exc:
                 self._record_failure(exc)
-        return await codeintel_repository.list_diagnostics(
+        items = await codeintel_repository.list_diagnostics(
             db,
             workspace_id=workspace_id,
             file_path=file_path,
             severity=severity,
             limit=limit,
+        )
+        return LspResult(
+            items=items,
+            source=SOURCE_STATIC_FALLBACK,
+            lsp_status=self._state.mode,
+            fallback_reason=self._state.last_error,
+            lsp=self.status(),
         )
 
     def _should_use_real_lsp(self) -> bool:

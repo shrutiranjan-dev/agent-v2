@@ -20,7 +20,8 @@ The fast CI path starts a real `pgvector/pgvector:pg16` Postgres service for mig
 The deterministic smoke scripts are:
 
 - `scripts/codeintel-smoke.sh`
-- `scripts/lsp-smoke.sh` in static fallback mode
+- `scripts/lsp-smoke.sh` in static fallback mode (`REAL_LSP=disabled_static_fallback`)
+- `scripts/lsp-smoke.sh --real` in real mode if `python -c "import pylsp"` succeeds, otherwise `REAL_LSP=skipped_pylsp_missing` when `--skip-real-if-missing` is set
 - `scripts/mcp-plugin-smoke.sh`
 - `scripts/observability-smoke.sh`
 - `scripts/cli-tui-smoke.ps1` (also run as a dedicated CI job)
@@ -158,5 +159,5 @@ bash scripts/validate-local.sh --skip-frontend --skip-tests
 
 - Human-input and memory-compaction smokes are skipped by design when `AP_ENABLE_TEST_ENDPOINTS=false`.
 - Ollama model generation is never required in default CI. The CI sets `AP_OLLAMA_BASE_URL=http://127.0.0.1:9` so any accidental model call fails fast instead of silently succeeding against a missing local model.
-- Real LSP is disabled by default unless `STRICT_REAL_LSP=1` is set and a working `pylsp` binary is present on the runner. Default CI uses the static fallback.
+- Real LSP is disabled by default unless `STRICT_REAL_LSP=1` is set and a working `pylsp` binary is present on the runner. Default CI uses the static fallback. The smoke prints `REAL_LSP=disabled_static_fallback` (default) or `REAL_LSP=passed` (after pylsp is verified to actually handle a request and at least one `/code/...` response contains `source: real_lsp`). Use `--Real` / `--real` to opt into the real-mode smoke and `--skip-real-if-missing` to print `REAL_LSP=skipped_pylsp_missing` instead of failing when `pylsp` is not installed. The smoke never claims `REAL_LSP=passed` unless the response body's `source` field is `real_lsp`.
 - The dedicated `cli-tui-smoke` CI job starts a real backend and runs `tui --check`. It does not launch the full Textual app (which requires a TTY); that path is covered by `AgentPlatformTuiApp` instantiation in the import check step and by the local `cli-tui-smoke.ps1` script.
