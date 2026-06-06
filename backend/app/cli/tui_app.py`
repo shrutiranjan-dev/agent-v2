@@ -1,0 +1,375 @@
+from __future__ import annotations
+
+import asyncio
+from typing import Any
+
+from textual import App, dock
+from textual.app import AppComposition
+from textual.containers import Container, Horizontal, Vertical
+from textual.widgets import Footer, Header, Input, Label, ListItem, ListView, Static, ScrollableContainer
+from textual.reactive import reactive
+from textual.worker import Worker
+from textual.screen import ModalScreen
+from textual.widgets import Button
+
+from backend.app.cli.api_client import AgentApiClient
+from backend.app.cli.render import agents_table, queue_jobs_table, sessions_table, event_renderable
+from backend.app.cli.websocket_client import SessionEventStream
+from rich.panel import Panel
+from rich.text import Text
+from backend.app.cli.diff_preview import diff_preview_panel, extract_diff_preview
+
+class SessionItem(ListItem):
+    def __init__(self, session_id: str, title: str, agent_id: str):
+        super().__init__()
+        self.session_id = session_id
+        self.title = title
+        self.agent_id = agent_id
+        self.label = f"[bold]{title}[/bold] ({agent_id})"
+
+class PermissionModal(ModalScreen):
+    def __init__(self, client: AgentApiClient, permission_id: str, payload: dict[str, Any]):
+        super().__init__()
+        self.client = client
+        self.permission_id = permission_id
+        self.payload = payload
+
+    def compose(self):
+        with Vertical(id="modal_container"):
+            renderable = event_renderable({"type": "permission.requested", "payload": self.payload})
+            yield Static(renderable, id="permission_content")
+            with Horizontal(id="modal_buttons"):
+                yield Button("Approve", id="approve", variant="success")
+                yield Button("Deny", id="deny", variant="error")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "approve":
+            try:
+                self.client.approve_permission(self.permission_id)
+                self.app.notify("Permission approved", severity="information")
+            except Exception as e:
+                self.app.notify(f"Approval failed: {e}", severity="error")
+        elif event.button.id == "deny":
+            try:
+                self.client.deny_permission(self.permission_id)
+                self.app.notify("Permission denied", severity="warning")
+            except Exception as e:
+                self.app.notify(f"Denial failed: {e}", severity="error")
+        self.dismiss(self.app.restart_event_stream if hasattr(self.app, "restart_event_stream") else None)
+
+class HumanInputModal(ModalScreen):
+    def __init__(self, client: AgentApiClient, request_id: str, payload: dict[str, Any]):
+        super().__init__()
+        self.client = client
+        self.request_id = request_id
+        self.payload = payload
+
+    def compose(self):
+        with Vertical(id="modal_container"):
+            renderable = event_renderable({"type": "question.requested", "payload": self.payload})
+            yield Static(renderable, id="question_content")
+            
+            if self.payload.get("allow_free_text"):
+                yield Input(placeholder="Your answer...", id="answer_input")
+            elif self.payload.get("choices"):
+                with Vertical(id="choices_list"):
+                    for choice in self.payload["choices"]:
+                        yield Button(str(choice), id=f"choice_{choice}")
+            
+            with Horizontal(id="modal_buttons"):
+                yield Button("Submit", id="submit", variant="primary")
+                yield Button("Cancel", id="cancel", variant="error")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "submit":
+            ans = self.query_one("#answer_input", Input).value if self.payload.get("allow_free_text") else None
+            if ans is None and self.payload.get("choices"):
+                pass 
+            
+            try:
+                self.client.answer_human_input(self.request_id, answer=ans or "Proceed")
+                self.app.notify("Answer submitted", severity="information")
+            except Exception as e:
+                self.app.notify(f"Submission failed: {e}", severity="error")
+                return
+            self.dismiss(self.app.restart_event_stream if hasattr(self.app, "restart_event_stream") else None)
+            
+        elif event.button.id.startswith("choice_"):
+            choice = event.button.label
+            try:
+                self.client.answer_human_input(self.request_id, answer=choice)
+                self.app.notify(f"Answered: {choice}", severity="information")
+            except Exception as e:
+                self.app.notify(f"Answer failed: {e}", severity="error")
+                return
+            self.dismiss(self.app.restart_event_stream if hasattr(self.app, "restart_event_stream") else None)
+            
+        elif event.button.id == "cancel":
+            try:
+                self.client.cancel_human_input(self.request_id)
+                self.app.notify("Input cancelled", severity="warning")
+            except Exception as e:
+                self.app.notify(f"Cancellation failed: {e}", severity="error")
+            self.dismiss(self.app.restart_event_stream if hasattr(self.app, "restart_event_stream") else None)
+
+class DiffModal(ModalScreen):
+    def __init__(self, payload: dict[str, Any]):
+        super().__init__()
+        self.payload = payload
+
+    def compose(self):
+        with Vertical(id="modal_container"):
+            yield Static(diff_preview_panel(self.payload), id="diff_content")
+            with Horizontal(id="modal_buttons"):
+                yield Button("Close", id="close", variant="primary")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss()
+
+class ToolTimeline(Static):
+    def __init__(self):
+        super().__init__()
+        self.content = Text()
+
+    def add_event(self, event: dict[str, Any]):
+        event_type = event.get("type") or event.get("event_type") or "event"
+        payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+        tool = payload.get("tool_name") or payload.get("tool") or "job"
+        status = payload.get("status") or event_type.rsplit(".", 1)[-1]
+        
+        color = "green" if status == "completed" else "red" if status == "failed" else "yellow"
+        self.content.append(f" {tool} → ", style="dim")
+        self.content.append(f"{status}\n", style=color)
+        self.update(Panel(self.content, title="Tool Timeline"))
+
+class EventStream(ScrollableContainer):
+    def __init__(self):
+        super().__init__()
+        self.messages = []
+
+    def add_event(self, event: dict[str, Any]):
+        renderable = event_renderable(event)
+        msg_widget = Static(renderable)
+        msg_widget.styles.margin = (0, 1)
+        self.mount(msg_widget)
+        self.scroll_end()
+
+class AgentTUI(App):
+    CSS = """
+    Screen {
+        background: #1a1b26;
+    }
+    #sidebar {
+        width: 35;
+        background: #24283b;
+        border-right: vline #414868;
+    }
+    #main_view {
+        flex: 1;
+        background: #1a1b26;
+    }
+    #timeline {
+        width: 35;
+        background: #24283b;
+        border-left: vline #414868;
+    }
+    #input_area {
+        height: 3;
+        dock: bottom;
+        background: #24283b;
+        border-top: vline #414868;
+    }
+    #modal_container {
+        background: #1a1b26;
+        border: double white;
+        padding: 1;
+        width: 70%;
+        height: auto;
+        align: center middle;
+    }
+    #modal_buttons {
+        align: right middle;
+        height: 3;
+        margin-top: 1;
+    }
+    #choices_list {
+        align: center middle;
+        margin: 1 0;
+    }
+    .session-item {
+        padding: 1;
+    }
+    """
+
+    BINDINGS = [
+        ("ctrl+n", "new_session", "New Session"),
+        ("ctrl+s", "focus_sessions", "Sessions"),
+        ("ctrl+a", "switch_agent", "Switch Agent"),
+        ("ctrl+d", "show_diff", "Show Last Diff"),
+        ("ctrl+r", "retry_run", "Retry Failed Run"),
+        ("ctrl+q", "quit", "Quit"),
+    ]
+
+    def __init__(self, client: AgentApiClient):
+        super().__init__()
+        self.client = client
+        self.active_session_id: str | None = None
+        self.active_agent_id: str = "build"
+        self.ws_worker: Worker | None = None
+        self.last_diff_payload: dict[str, Any] | None = None
+
+    @AppComposition
+    def compose(self):
+        yield Header(show_clock=True)
+        with Horizontal():
+            yield ListView(id="sidebar", label="Sessions")
+            with Vertical(id="main_view"):
+                yield EventStream(id="event_stream")
+            yield ToolTimeline(id="timeline")
+        yield Input(placeholder="Enter prompt...", id="prompt_input")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        self.refresh_sessions()
+        self.update_header()
+
+    def update_header(self):
+        status = f"Agent: {self.active_agent_id} | Session: {self.active_session_id or 'None'}"
+        self.title = f"Agent Platform TUI | {status}"
+
+    def refresh_sessions(self):
+        sessions = self.client.list_sessions()
+        list_view = self.query_one("#sidebar", ListView)
+        list_view.clear()
+        for s in sessions:
+            list_view.append(SessionItem(str(s["id"]), s.get("title", "Untitled"), s.get("agent_id", "build")))
+
+    async def on_list_view_selected(self, event: ListView.Selected):
+        item = event.item
+        if isinstance(item, SessionItem):
+            self.active_session_id = item.session_id
+            self.active_agent_id = item.agent_id
+            self.update_header()
+            await self.load_session_history()
+            self.start_event_stream()
+
+    async def load_session_history(self):
+        stream = self.query_one("#event_stream", EventStream)
+        stream.clear()
+        events = self.client.list_events(self.active_session_id)
+        for event in events:
+            self._handle_event(event, is_history=True)
+
+    def start_event_stream(self):
+        if self.ws_worker:
+            self.ws_worker.stop()
+        
+        self.ws_worker = self.run_worker(self._stream_events(), thread=False)
+
+    def restart_event_stream(self):
+        self.start_event_stream()
+
+    async def _stream_events(self):
+        if not self.active_session_id:
+            return
+        
+        from backend.app.cli.config import load_cli_config
+        config = load_cli_config()
+        stream = SessionEventStream(config, self.active_session_id)
+        
+        async for event in stream.events():
+            self.call_from_thread(self._handle_event, event)
+
+    def _handle_event(self, event: dict[str, Any], is_history: bool = False):
+        event_type = event.get("type") or event.get("event_type") or ""
+        payload = event.get("payload") or {}
+        
+        # Track diffs for Ctrl+D
+        if "tool_call" in event_type and extract_diff_preview(payload).get("diff"):
+            self.last_diff_payload = payload
+
+        if not is_history:
+            if event_type == "permission.requested":
+                perm_id = payload.get("permission_request_id") or payload.get("id")
+                if perm_id:
+                    self.push_screen(PermissionModal(self.client, str(perm_id), payload))
+                return
+
+            if event_type == "question.requested":
+                req_id = payload.get("human_input_request_id") or payload.get("id")
+                if req_id:
+                    self.push_screen(HumanInputModal(self.client, str(req_id), payload))
+                return
+
+        self.query_one("#event_stream", EventStream).add_event(event)
+        self.query_one("#timeline", ToolTimeline).add_event(event)
+
+    def action_new_session(self):
+        title = "Terminal Session"
+        session = self.client.create_session(title=title, agent_id=self.active_agent_id)
+        self.active_session_id = str(session["id"])
+        self.refresh_sessions()
+        self.update_header()
+        self.start_event_stream()
+
+    def action_switch_agent(self):
+        # Basic toggle for now, logic preserved from prompt
+        self.active_agent_id = "general" if self.active_agent_id == "build" else "build"
+        self.update_header()
+
+    def action_show_diff(self):
+        if self.last_diff_payload:
+            self.push_screen(DiffModal(self.last_diff_payload))
+        else:
+            self.notify("No diff preview available for last tool call", severity="warning")
+
+    def action_retry_run(self):
+        if not self.active_session_id:
+            self.notify("No active session to retry", severity="error")
+            return
+        
+        # Use the queue jobs API to find the latest failed job
+        jobs = self.client.list_queue_jobs(session_id=self.active_session_id)
+        failed_jobs = [j for j in jobs if j.get("status") in {"failed", "blocked", "dead_letter"}]
+        
+        if not failed_jobs:
+            self.notify("No failed runs found to retry", severity="info")
+            return
+            
+        latest_job = failed_jobs[0]
+        job_id = latest_job.get("id") or latest_job.get("queue_job_id")
+        
+        # Note: We don't have a specific /retry endpoint in api_client yet.
+        # We'll use a prompt to let the user know or implement a minimal call.
+        self.notify(f"Retrying job {job_id}...", severity="information")
+        # Ideal implementation: client.retry_job(job_id)
+        # For now, we simulate the request manually using the internal _request if we have the endpoint.
+        try:
+            self.client._request("POST", f"/queue/jobs/{job_id}/retry")
+            self.start_ la_event_stream()
+        except Exception as e:
+            self.notify(f"Retry failed: {e}", severity="error")
+
+    async def on_input_submitted(self, event: Input.Submitted):
+        prompt = event.value.strip()
+        if not prompt:
+            return
+        
+        input_widget = self.query_one("#prompt_input", Input)
+        input_widget.value = ""
+        
+        if not self.active_session_id:
+            session = self.client.create_session(title="Terminal session", agent_id=self.active_agent_id)
+            self.active_session_id = str(session["id"])
+            self.update_header()
+            self.refresh_sessions()
+
+        try:
+            self.client.send_message(self.active_session_id, content=prompt, agent_id=self.active_agent_id)
+            self.start_event_stream()
+        except Exception as e:
+            self.call_from_thread(lambda: self.notify(f"Error: {str(e)}", severity="error"))
+
+def run_tui(client: AgentApiClient, *, console: Console | None = None) -> None:
+    app = AgentTUI(client)
+    app.run()
