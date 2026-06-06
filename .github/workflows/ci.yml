@@ -19,6 +19,7 @@ jobs:
       AP_REDIS_PUBSUB_ENABLED: "false"
       AP_QDRANT_ENABLED: "false"
       AP_MEMORY_EMBEDDING_ENABLED: "false"
+      AP_OLLAMA_BASE_URL: http://host.docker.internal:11434
       AP_WORKSPACE_ROOT: ${{ github.workspace }}
     steps:
       - uses: actions/checkout@v4
