@@ -4,6 +4,7 @@ Audit commit: `8d63be8`
 Verified overall parity: 72% (Code Intelligence and LSP raised to 86% with both fake-LSP path validation AND live real-pylsp 1.14.0 validation in this audit; status is now `REAL_LSP_VALIDATED` for the Python LSP path)
 Latest batch: `P0 CI + CLI/TUI release hardening` (DONE; see implementation-roadmap.md and the latest commit for the resolution).
 Latest local policy: `Make Windows PowerShell the primary local workflow` (DONE; see [`docs/windows-shell-policy.md`](../windows-shell-policy.md) and [`docs/codex-windows-execution.md`](../codex-windows-execution.md) for the project-wide rule, and the `validate-local.ps1` summary in this audit for the new passed/failed/skipped reporting).
+Latest smoke reliability: `Windows Smoke Reliability Batch` (DONE; see `validate-local.ps1 -WithSmokes` now reports `passed=N failed=0 skipped=M warned=K` with no misleading optional failures; queue-worker stale heartbeat is WARN when Docker backend-worker is healthy, mcp-plugin is SKIP when `MCP_REAL_SERVER` is missing, permission-resume is SKIP without `AP_ENABLE_TEST_ENDPOINTS=true`, and the `SMOKE_RESULT=...` marker protocol is documented in [`docs/ci.md`](../ci.md) under "Smoke Result Semantics").
 
 ## Validation Lanes
 

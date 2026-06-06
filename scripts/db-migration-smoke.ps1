@@ -14,7 +14,24 @@ function Write-SmokeLog {
 function Fail-Smoke {
     param([string]$Message)
     Write-Error "[$ScriptName] FAIL: $Message"
+    Write-Host "SMOKE_RESULT=failed"
+    Write-Host "SMOKE_REASON=$Message"
+    Write-Host "SMOKE_CATEGORY=required"
     exit 2
+}
+
+function Write-SmokeResult {
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet("passed", "failed", "skipped", "warned")]
+        [string]$Result,
+        [string]$Reason = ""
+    )
+    Write-Host "SMOKE_RESULT=$Result"
+    if ($Reason) {
+        Write-Host "SMOKE_REASON=$Reason"
+    }
+    Write-Host "SMOKE_CATEGORY=required"
 }
 
 if (-not $DatabaseUrl) {
@@ -93,3 +110,4 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-SmokeLog "migration smoke ok"
+Write-SmokeResult -Result "passed"

@@ -247,3 +247,83 @@ bash scripts/validate-local.sh --skip-frontend --skip-tests
 - Ollama model generation is never required in default CI. The CI sets `AP_OLLAMA_BASE_URL=http://127.0.0.1:9` so any accidental model call fails fast instead of silently succeeding against a missing local model.
 - Static-fallback LSP still remains the default behavior for the general `safe-smokes` job. The dedicated `real-python-lsp-smoke` job is the strict gate for the live `pylsp` path. The smoke prints `REAL_LSP=passed` only after `pylsp` is importable and at least one `/code/...` response body reports `source: real_lsp`.
 - The dedicated `cli-tui-smoke` CI job starts a real backend and runs `tui --check`. It does not launch the full Textual app (which requires a TTY); that path is covered by `AgentPlatformTuiApp` instantiation in the import check step and by the local `cli-tui-smoke.ps1` script.
+
+## Smoke Result Semantics
+
+The PowerShell smokes and `validate-local.ps1` use a standardised four-state
+result protocol so the validator can be truthful about which checks ran,
+which were skipped, which degraded, and which failed.
+
+Each smoke prints one of:
+
+```text
+SMOKE_RESULT=passed
+SMOKE_RESULT=failed
+SMOKE_RESULT=skipped
+SMOKE_RESULT=warned
+```
+
+Optionally:
+
+```text
+SMOKE_REASON=<short reason>
+SMOKE_CATEGORY=required|optional
+```
+
+`validate-local.ps1` parses these markers (and falls back to exit code when
+the marker is absent). The final summary is always:
+
+```text
+summary: passed=X failed=Y skipped=Z warned=W
+```
+
+Exit behaviour:
+
+- `failed > 0` of a **required** step -> exit non-zero.
+- `failed > 0` of an **optional** step -> log a WARN line, do not exit 1.
+- `skipped` -> optional check could not run because a prerequisite is
+  missing; never increments `failed` and never exits non-zero by default.
+- `warned` -> optional check ran and found a degraded / non-blocking
+  condition; never exits non-zero.
+- `-RequireOptionalSmokes` converts optional `SKIP` -> `FAIL` so the user
+  can opt into stricter handling.
+
+Required Windows smokes (must pass on every run):
+
+- `cli-tui-smoke.ps1` (also required in default `validate-local.ps1`)
+- `db-migration-smoke.ps1` when Docker Postgres is up
+- `codeintel-smoke.ps1` when the backend is up
+- `lsp-smoke.ps1` (static fallback path; the strict real-pylsp path is the
+  dedicated CI job, not a Windows local required step)
+
+Optional Windows smokes (skip cleanly when prerequisites are missing):
+
+- `observability-smoke.ps1`
+- `queue-worker-smoke.ps1` (WARN if all workers are stale but Docker
+  backend-worker is healthy; SKIP if Docker is not available)
+- `mcp-plugin-smoke.ps1` (SKIP when `MCP_REAL_SERVER` is not configured or
+  the plugin system reports degraded; full plugin / MCP flow needs Bash)
+- `real-mcp-smoke.ps1` (SKIP if MCP SDK is missing; full flow needs Bash)
+- `permission-resume-smoke.ps1` (SKIP unless `AP_ENABLE_TEST_ENDPOINTS=true`,
+  an Ollama model is available, and active worker heartbeats exist; the
+  full e2e flow needs Bash)
+
+Why some smokes skip without `AP_ENABLE_TEST_ENDPOINTS=true`:
+
+- The `permission-resume` and `human-input` deterministic flows bypass
+  Ollama rate limits and randomness to make the test deterministic. They
+  are not safe in production or in any environment where the backend
+  might be exposed to real user input, so they are gated by the same
+  `AP_ENABLE_TEST_ENDPOINTS` flag that the in-process test endpoints use.
+
+How to enable optional smokes intentionally:
+
+- `AP_ENABLE_TEST_ENDPOINTS=true docker compose up -d --build backend` then
+  `powershell -ExecutionPolicy Bypass -File scripts\permission-resume-smoke.ps1`
+  to run the full permission resume e2e flow.
+- `MCP_REAL_SERVER=<stdio-spec> powershell -ExecutionPolicy Bypass -File
+  scripts\mcp-plugin-smoke.ps1` to opt into the full MCP plugin flow
+  (still needs Bash on Windows for the actual plugin load test).
+- `powershell -ExecutionPolicy Bypass -File scripts\validate-local.ps1
+  -WithSmokes -RequireOptionalSmokes` to promote every `SKIP` to `FAIL`
+  and see which optional checks the local environment cannot run.

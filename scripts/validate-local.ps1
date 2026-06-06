@@ -3,6 +3,7 @@ param(
     [switch]$WithSmokes,
     [switch]$SkipFrontend,
     [switch]$SkipTests,
+    [switch]$RequireOptionalSmokes,
     [string]$BaseUrl = "http://localhost:8000"
 )
 
@@ -10,14 +11,26 @@ $ErrorActionPreference = "Stop"
 
 $ScriptName = "validate-local"
 
-# Counters for the final passed/failed/skipped summary. Required steps use
-# `pass` / `fail`; optional steps that are explicitly turned off or that
-# short-circuit because of a missing tool use `skip`. The script only exits
-# non-zero on a real `fail` of a required step, never on a `skip`, and never
-# on an optional step failure.
+# ---------------------------------------------------------------------------
+# Result semantics
+# ---------------------------------------------------------------------------
+# Required check: must pass. Failure -> exit non-zero, summary shows FAIL.
+# Optional check with prerequisites present: PASS / WARN / FAIL.
+# Optional check with missing prerequisite: SKIP (never FAIL by default).
+#   The user can opt into stricter handling with -RequireOptionalSmokes,
+#   which converts SKIP -> FAIL.
+#
+# Result categories:
+#   pass:    check succeeded
+#   fail:    check failed (or was SKIP and -RequireOptionalSmokes was set)
+#   skip:    optional check could not run because a prerequisite is missing
+#   warn:    optional check ran but found a degraded / non-blocking condition
+# ---------------------------------------------------------------------------
+
 $script:StepsPassed = 0
 $script:StepsFailed = 0
 $script:StepsSkipped = 0
+$script:StepsWarned = 0
 $script:RequiredStepsFailed = 0
 $script:StepRecords = @()
 
@@ -34,7 +47,7 @@ function Record-Step {
         [ValidateSet("required", "optional")]
         [string]$Category,
         [Parameter(Mandatory = $true)]
-        [ValidateSet("pass", "fail", "skip")]
+        [ValidateSet("pass", "fail", "skip", "warn")]
         [string]$Result,
         [string]$Detail = ""
     )
@@ -53,6 +66,7 @@ function Record-Step {
             }
         }
         "skip" { $script:StepsSkipped += 1 }
+        "warn" { $script:StepsWarned += 1 }
     }
 }
 
@@ -75,6 +89,7 @@ function Write-Summary {
             "pass" { "PASS" }
             "fail" { "FAIL" }
             "skip" { "SKIP" }
+            "warn" { "WARN" }
         }
         $line = "[$ScriptName] $marker $($record.name)"
         if ($record.category -eq "optional") {
@@ -85,7 +100,8 @@ function Write-Summary {
         }
         Write-Host $line
     }
-    Write-Step "summary: passed=$script:StepsPassed failed=$script:StepsFailed skipped=$script:StepsSkipped"
+    Write-Step ("summary: passed={0} failed={1} skipped={2} warned={3}" -f `
+        $script:StepsPassed, $script:StepsFailed, $script:StepsSkipped, $script:StepsWarned)
 }
 
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
@@ -256,6 +272,7 @@ if ($WithSmokes) {
     $smokeFailures = @()
     $smokeSkips = @()
     $smokePasses = @()
+    $smokeWarns = @()
     foreach ($smoke in $smokeScripts) {
         $smokeStep = "smoke: $smoke"
         $path = Join-Path $RepoRoot "scripts\$smoke"
@@ -285,6 +302,24 @@ if ($WithSmokes) {
         $output = @()
         if (Test-Path -LiteralPath $stdoutFile) { $output += Get-Content -LiteralPath $stdoutFile }
         if (Test-Path -LiteralPath $stderrFile) { $output += Get-Content -LiteralPath $stderrFile }
+
+        # Standardize smoke result semantics via SMOKE_RESULT=... marker.
+        # Falls back to exit code when the marker is absent. The optional
+        # category of a step is decided by the smoke's own SMOKE_CATEGORY
+        # marker (default "optional"); -RequireOptionalSmokes converts
+        # SKIP -> FAIL for the optional ones.
+        $marker = $null
+        $markerReason = ""
+        $smokeCategory = "optional"
+        foreach ($line in $output) {
+            if ($line -match "(?i)SMOKE_RESULT\s*=\s*(passed|failed|skipped|warned)") {
+                $marker = ($Matches[1]).ToLower()
+            } elseif ($line -match "(?i)SMOKE_REASON\s*=\s*(.*)$") {
+                $markerReason = $Matches[1].Trim()
+            } elseif ($line -match "(?i)SMOKE_CATEGORY\s*=\s*(required|optional)") {
+                $smokeCategory = $Matches[1].ToLower()
+            }
+        }
         $skippedByMessage = $false
         foreach ($line in $output) {
             if ($line -match "Bash optional") {
@@ -292,22 +327,48 @@ if ($WithSmokes) {
                 break
             }
         }
-        if ($code -ne 0) {
+
+        $result = $null
+        $detail = ""
+        if ($marker) {
+            switch ($marker) {
+                "passed"  { $result = "pass"; $smokePasses += $smoke }
+                "failed"  { $result = "fail"; $smokeFailures += $smoke }
+                "warned"  { $result = "warn";  $smokeWarns += $smoke }
+                "skipped" { $result = "skip"; $smokeSkips += $smoke }
+            }
+            $detail = $markerReason
+        } elseif ($skippedByMessage) {
+            $result = "skip"
+            $detail = "Bash optional (no Bash on host)"
+            $smokeSkips += $smoke
+        } elseif ($code -ne 0) {
+            $result = "fail"
+            $detail = "exit=$code"
+            $smokeFailures += $smoke
+        } else {
+            $result = "pass"
+            $smokePasses += $smoke
+        }
+
+        if ($result -eq "fail") {
             Write-Step "--- $smoke output (exit $code) ---"
             $output | ForEach-Object { Write-Host $_ }
             Write-Step "--- end $smoke output ---"
-            $smokeFailures += $smoke
-            Record-Step -Name $smokeStep -Category "optional" -Result "fail" -Detail "exit=$code"
-        } elseif ($skippedByMessage) {
-            $smokeSkips += $smoke
-            Record-Step -Name $smokeStep -Category "optional" -Result "skip" -Detail "Bash optional (no Bash on host)"
-        } else {
-            $smokePasses += $smoke
-            Record-Step -Name $smokeStep -Category "optional" -Result "pass"
         }
+
+        if ($RequireOptionalSmokes -and $smokeCategory -eq "optional" -and $result -eq "skip") {
+            $result = "fail"
+            $smokeSkips = @($smokeSkips | Where-Object { $_ -ne $smoke })
+            $smokeFailures += $smoke
+            $detail = "RequireOptionalSmokes: " + $detail
+        }
+
+        Record-Step -Name $smokeStep -Category $smokeCategory -Result $result -Detail $detail
         Remove-Item -LiteralPath $stdoutFile, $stderrFile -ErrorAction SilentlyContinue
     }
-    Write-Step "smoke summary: passed=$($smokePasses.Count) failed=$($smokeFailures.Count) skipped=$($smokeSkips.Count)"
+    Write-Step ("smoke summary: passed={0} failed={1} skipped={2} warned={3}" -f `
+        $smokePasses.Count, $smokeFailures.Count, $smokeSkips.Count, $smokeWarns.Count)
     if ($smokeFailures.Count -gt 0) {
         # Optional smoke failures do not fail the overall validation; they
         # are reported in the summary so the user can see what was attempted

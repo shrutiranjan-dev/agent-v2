@@ -19,7 +19,24 @@ function Write-SmokeLog {
 function Fail-Smoke {
     param([string]$Message)
     Write-Error "[$ScriptName] FAIL: $Message"
+    Write-Host "SMOKE_RESULT=failed"
+    Write-Host "SMOKE_REASON=$Message"
+    Write-Host "SMOKE_CATEGORY=required"
     exit 2
+}
+
+function Write-SmokeResult {
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet("passed", "failed", "skipped", "warned")]
+        [string]$Result,
+        [string]$Reason = ""
+    )
+    Write-Host "SMOKE_RESULT=$Result"
+    if ($Reason) {
+        Write-Host "SMOKE_REASON=$Reason"
+    }
+    Write-Host "SMOKE_CATEGORY=required"
 }
 
 $RealMode = [bool]$Real -or ($StrictRealLsp -eq "1")
@@ -206,3 +223,4 @@ if ($RealMode) {
     Write-Host "REAL_LSP=disabled_static_fallback"
 }
 Write-SmokeLog "lsp smoke ok"
+Write-SmokeResult -Result "passed"

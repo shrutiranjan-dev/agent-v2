@@ -136,4 +136,8 @@ A Bash-only smoke (`mcp-plugin-smoke.sh`, `real-mcp-smoke.sh`,
 PowerShell wrapper that prints "Bash optional" and skips gracefully when
 no Bash shell is installed. The wrapper must exit `0` on the skip path so
 that `validate-local.ps1 -WithSmokes` continues to be truthful about which
-smokes were run.
+smokes were run. The PowerShell wrapper also runs prerequisite checks
+(backend health, dependency health, env vars, Docker worker state) and
+prints `SMOKE_RESULT=skipped` with a short `SMOKE_REASON` whenever the
+underlying Bash smoke cannot be exercised; this is documented in
+[`docs/ci.md`](ci.md) under "Smoke Result Semantics".

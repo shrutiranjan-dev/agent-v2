@@ -3,6 +3,7 @@
 Audit commit: `8d63be8`
 Latest batch: `P0 CI + CLI/TUI release hardening` (DONE — see implementation-roadmap.md and the latest commit for the resolution).
 Latest local policy: `Make Windows PowerShell the primary local workflow` (DONE — see [`docs/windows-shell-policy.md`](../windows-shell-policy.md), [`docs/codex-windows-execution.md`](../codex-windows-execution.md), and the `validate-local.ps1` summary in this audit for the new passed/failed/skipped reporting).
+Latest smoke reliability: `Windows Smoke Reliability Batch` (DONE — see [`docs/ci.md`](../ci.md) "Smoke Result Semantics"; `validate-local.ps1 -WithSmokes` now reports `passed=N failed=0 skipped=M warned=K`, queue-worker stale heartbeat is WARN, mcp-plugin and permission-resume are SKIP when prerequisites are missing, and the `SMOKE_RESULT=...` marker protocol is honoured by all PowerShell smokes).
 Latest LSP progress: `Real LSP CI follow-through` (workflow added, but current status reverted to `REAL_LSP_CI_JOB_ADDED_PENDING_REMOTE_VALIDATION` after repo-local verification found CI failures on commits 2564c64 and ed13d13).
 
 ## 1. Restore Green CI

@@ -157,6 +157,78 @@ A `validate-local.sh` mirror is available for Linux/macOS developers:
 ```bash
 bash scripts/validate-local.sh
 bash scripts/validate-local.sh --with-smokes
+bash scripts/validate-local.sh --with-smokes --require-optional-smokes
+```
+
+## Smoke Result Semantics
+
+`validate-local.ps1` and the PowerShell smokes use a standardised
+four-state result protocol so the validator stays truthful about which
+checks ran, which were skipped, which degraded, and which failed. Each
+smoke prints a `SMOKE_RESULT=passed|failed|skipped|warned` marker (with
+optional `SMOKE_REASON=` and `SMOKE_CATEGORY=required|optional`); the
+parser falls back to the script's exit code when the marker is absent.
+The final summary is always:
+
+```text
+summary: passed=X failed=Y skipped=Z warned=W
+```
+
+Exit behaviour:
+
+- `failed > 0` of a **required** step -> exit non-zero.
+- `failed > 0` of an **optional** step -> log a WARN line, do not exit 1.
+- `skipped` -> optional check could not run because a prerequisite is
+  missing; never exits non-zero by default.
+- `warned` -> optional check ran and found a degraded / non-blocking
+  condition; never exits non-zero.
+- `-RequireOptionalSmokes` (or `--require-optional-smokes` in Bash)
+  converts optional `SKIP` -> `FAIL` so the user can opt into stricter
+  handling.
+
+Required Windows smokes (must pass on every run):
+
+- `cli-tui-smoke.ps1` (also a required step of the default validator)
+- `db-migration-smoke.ps1` (when Docker Postgres is up)
+- `codeintel-smoke.ps1` (when the backend is up)
+- `lsp-smoke.ps1` (static fallback path; the strict real-pylsp path is
+  the dedicated CI job, not a Windows local required step)
+
+Optional Windows smokes (skip cleanly when prerequisites are missing):
+
+- `observability-smoke.ps1`
+- `queue-worker-smoke.ps1` (WARN if all workers are stale but Docker
+  `backend-worker` is healthy; SKIP if Docker is not available)
+- `mcp-plugin-smoke.ps1` (SKIP when `MCP_REAL_SERVER` is not configured
+  or the plugin system reports degraded; full plugin / MCP flow needs
+  Bash)
+- `real-mcp-smoke.ps1` (SKIP if MCP SDK is missing; full flow needs
+  Bash)
+- `permission-resume-smoke.ps1` (SKIP unless
+  `AP_ENABLE_TEST_ENDPOINTS=true`, an Ollama model is available, and
+  active worker heartbeats exist; the full e2e flow needs Bash)
+
+Why some smokes skip without `AP_ENABLE_TEST_ENDPOINTS=true`:
+
+- The `permission-resume` and `human-input` deterministic flows bypass
+  Ollama rate limits and randomness to make the test deterministic.
+  They are not safe in production or in any environment where the
+  backend might be exposed to real user input, so they are gated by the
+  same `AP_ENABLE_TEST_ENDPOINTS` flag that the in-process test
+  endpoints use.
+
+How to enable optional smokes intentionally:
+
+```powershell
+# Run the full permission resume e2e flow against a backend that has
+# AP_ENABLE_TEST_ENDPOINTS=true (set in docker-compose.yml or .env).
+$env:AP_ENABLE_TEST_ENDPOINTS = "true"
+docker compose up -d --build backend
+powershell -ExecutionPolicy Bypass -File scripts\permission-resume-smoke.ps1
+
+# Promote every SKIP to FAIL so the validator surfaces missing
+# prerequisites instead of skipping them silently.
+powershell -ExecutionPolicy Bypass -File scripts\validate-local.ps1 -WithSmokes -RequireOptionalSmokes
 ```
 
 Other smoke checks (CI / Linux helper; only run these when explicitly asked):

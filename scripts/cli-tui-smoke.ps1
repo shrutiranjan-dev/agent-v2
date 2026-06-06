@@ -114,3 +114,5 @@ if ($importSmoke -notmatch "tui import smoke ok") {
 }
 
 Write-Host "[cli-tui-smoke] ok"
+Write-Host "SMOKE_RESULT=passed"
+Write-Host "SMOKE_CATEGORY=required"

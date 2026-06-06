@@ -43,7 +43,7 @@
     "docker_backend_worker_boot": "PASS",
     "cli_tui_smoke": "PASS",
     "bash_smokes": "NOT_RUN: local Bash/WSL unavailable; bash-delegating smokes (mcp-plugin-smoke, real-mcp-smoke, permission-resume-smoke) print 'Bash optional' and exit 0 on Windows without Bash; validate-local.ps1 -WithSmokes classifies them as skipped",
-    "post_audit_validate_local": "PASS: compile, ruff, pytest, frontend build, docker compose config, cli-tui smoke all green; -WithSmokes runs observability-smoke.ps1 and queue-worker-smoke.ps1 against the live backend; new passed/failed/skipped summary at the end of every run"
+    "post_audit_validate_local": "PASS: compile, ruff, pytest, frontend build, docker compose config, cli-tui smoke all green; -WithSmokes now reports passed=11 failed=0 skipped=4 warned=1 (queue-worker WARN, mcp-plugin SKIP, permission-resume SKIP, real-mcp PASS, others PASS); new passed/failed/skipped/warned summary at the end of every run; SMOKE_RESULT= marker protocol documented in docs/ci.md"
   },
   "categories": [
     {
