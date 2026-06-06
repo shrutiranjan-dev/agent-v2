@@ -55,9 +55,14 @@ jobs:
             Write-Host "parsed $($_.Name)"
           }
       - name: Check no CRLF in PowerShell scripts
+        # PowerShell scripts are intentionally stored with CRLF line endings
+        # (per .gitattributes: *.ps1 text eol=crlf). We verify they are NOT
+        # checked in as LF-only, which would break Windows PowerShell.
         run: |
-          if grep -l $'\r' scripts/*.ps1 2>/dev/null; then
-            echo "PowerShell scripts must use CRLF line endings" >&2
+          if grep -l $'\r' scripts/*.ps1 >/dev/null 2>&1; then
+            echo "PowerShell scripts found with CRLF endings (expected, .gitattributes enforces this)"
+          else
+            echo "PowerShell scripts missing CRLF line endings; .gitattributes should enforce *.ps1 text eol=crlf" >&2
             exit 1
           fi
       - name: Verify backend does not ignore artifact source package
@@ -65,8 +70,12 @@ jobs:
           test -f backend/app/artifacts/artifact_service.py
           ! git check-ignore -q backend/app/artifacts/artifact_service.py
       - name: Check pyproject.toml syntax
+        # Use tomllib.load with a binary file object (not tomllib.loads with
+        # bytes) because Python 3.12's tomllib.loads raises a confusing
+        # "bytes-like object is required" error for bytes input on 3.12.x.
+        # tomllib.load handles the binary->str decode internally.
         run: |
-          python -c "import tomllib; tomllib.loads(open('pyproject.toml', 'rb').read())"
+          python -c "import tomllib; tomllib.load(open('pyproject.toml', 'rb'))"
       - name: Upload hygiene log on failure
         if: failure()
         uses: actions/upload-artifact@v4
