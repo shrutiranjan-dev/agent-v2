@@ -122,11 +122,11 @@
 - Risk if ignored: If later added, repository write permissions need separate auth/approval design.
 
 ### CLI client
-- Current problem: migrate uses subprocess without structured errors; No CLI tests
-- Why it matters: Operators must use HTTP/UI even when UI is down.
-- Exact file(s): `backend/app/cli.py`
-- Exact recommended fix: Add Typer commands for health, models, sessions, send, and permissions.
-- Risk if ignored: Operators must use HTTP/UI even when UI is down.
+- Current improvement: CLI is now a package with Typer commands for health, agents, sessions, chat, queue status, artifacts, and a minimal Rich TUI; tests cover the client, parser, renderers, permission prompts, human-input prompts, and diff preview.
+- Why it matters: Operators can use the runtime from a terminal when the web UI is not ideal or not available.
+- Exact file(s): `backend/app/cli/main.py`, `backend/app/cli/api_client.py`, `backend/app/cli/websocket_client.py`, `backend/app/cli/tui_app.py`, `backend/tests/test_cli_flow.py`.
+- Exact recommended next fix: upgrade the minimal Rich loop to a full modal TUI with better session switching, replay cursors, and richer message-part rendering.
+- Risk if ignored: Batch 1 is usable, but the terminal UX will still feel more like an operator console than a polished full-screen coding workspace.
 
 ### Security model
 - Current problem: Bootstrap user creates single-user behavior; APIs are not protected by auth boundaries
@@ -145,11 +145,11 @@
 - Risk if ignored: Long sessions become unreliable and local models lose operational context.
 
 ### TUI client
-- Current problem: Headless interactive control is limited until CLI grows
+- Current improvement: A minimal Rich TUI loop now supports session listing, session creation/opening, agent switching, prompt sending, and queue/session status.
 - Why it matters: Headless users have less interactive control than OpenCode users.
-- Exact file(s): `docs/architecture/tui-future.md`
-- Exact recommended fix: Ignore for production v1; revisit with Textual after backend runtime and Web UI are stable.
-- Risk if ignored: Headless users have less interactive control than OpenCode users.
+- Exact file(s): `backend/app/cli/tui_app.py`.
+- Exact recommended next fix: add a Textual or equivalent full-screen layout with left session list, center event stream, right run/tool status, bottom input, and modal permission/human-input panels.
+- Risk if ignored: Terminal users have a functional flow, but not yet the fast keyboard-native polish expected from a dedicated coding TUI.
 
 ### Web UI dashboard
 - Current problem: Dashboard.tsx is a large single component; Polling and WebSocket state are mixed into one page

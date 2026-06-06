@@ -37,6 +37,7 @@ test = [
 ]
 
 [project.scripts]
+agentv2 = "backend.app.cli.main:main"
 agent-platform = "backend.app.cli:app"
 agent-platform-worker = "backend.app.queue.worker:main"
 

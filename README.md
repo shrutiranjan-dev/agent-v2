@@ -165,6 +165,44 @@ npm install
 npm run build
 ```
 
+## Terminal Coding Flow
+
+The backend also ships a local terminal-first CLI for agent operation. It uses the existing FastAPI runtime, WebSocket session events, permission APIs, human-input APIs, queue APIs, and artifact APIs; it does not bypass `ToolExecutor` or weaken permission checks.
+
+PowerShell examples:
+
+```powershell
+.\.venv\Scripts\python -m backend.app.cli.main health
+.\.venv\Scripts\python -m backend.app.cli.main agents
+.\.venv\Scripts\python -m backend.app.cli.main sessions list
+.\.venv\Scripts\python -m backend.app.cli.main sessions create --title "My session" --agent build
+.\.venv\Scripts\python -m backend.app.cli.main chat --session <session-id> --agent build "Implement the next safe task"
+.\.venv\Scripts\python -m backend.app.cli.main queue status
+.\.venv\Scripts\python -m backend.app.cli.main artifacts list --session <session-id>
+.\.venv\Scripts\python -m backend.app.cli.main tui
+```
+
+Configuration:
+
+```powershell
+$env:AP_CLI_BASE_URL="http://localhost:8000"
+$env:AP_CLI_WS_URL="ws://localhost:8000"
+$env:AP_CLI_TIMEOUT_SECONDS="30"
+```
+
+If installed from the package, `agentv2` is available as a console-script alias:
+
+```powershell
+agentv2 health
+agentv2 tui
+```
+
+The deterministic smoke script avoids model-dependent generation:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\cli-tui-smoke.ps1
+```
+
 ## CI
 
 GitHub Actions validate backend quality, frontend build, Docker Compose config, real Postgres migrations, deterministic non-Ollama smokes, and repo hygiene. Default CI requires no secrets and no cloud/model provider. See [docs/ci.md](docs/ci.md) for workflow details and local reproduction commands.

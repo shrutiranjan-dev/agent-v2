@@ -9,26 +9,26 @@
     "source": "external/opencode-source/packages/opencode/src",
     "note": "Reference evidence is used only for flow comparison. This project should not copy branding, UX language, or implementation details."
   },
-  "overall_parity_percent": 64,
+  "overall_parity_percent": 69,
   "selected_next_batch": {
-    "id": "artifact_session_observability",
-    "why": "Queue/worker visibility shipped in f7b1ad1; the matching high-value gap was safe artifact/session output visibility without exposing object-store internals.",
+    "id": "cli_tui_coding_flow",
+    "why": "CI and runtime validation are green; the highest-value product gap is now a keyboard-native local coding loop that uses the existing backend runtime.",
     "status": "implemented_in_worktree"
   },
   "flows": [
     {
       "id": "cli_tui_coding_flow",
       "category": "CLI/TUI coding flow",
-      "status": "missing",
-      "parity_percent": 20,
-      "evidence_files": ["frontend/src/pages/Dashboard.tsx", "backend/app/api/routes_sessions.py"],
+      "status": "partial",
+      "parity_percent": 58,
+      "evidence_files": ["backend/app/cli/main.py", "backend/app/cli/api_client.py", "backend/app/cli/websocket_client.py", "backend/app/cli/tui_app.py", "scripts/cli-tui-smoke.ps1"],
       "opencode_reference_evidence": ["cli/cmd/tui/routes/session/index.tsx", "server/shared/tui-control.ts"],
-      "impact": "Users have a capable web dashboard but no keyboard-native terminal coding loop.",
-      "next_task": "Add a minimal Python CLI/TUI for session select, message send, permission reply, and event tail.",
+      "impact": "Users can now start from terminal, list/create sessions, choose agents, send prompts, stream session events, reply to permission and human-input prompts, inspect queue jobs, and list artifacts without using the web dashboard.",
+      "next_task": "Upgrade the minimal Rich TUI to a full modal layout with durable cursor replay, richer message parts, and keyboard-first session switching.",
       "priority": "P1",
       "effort": "large",
       "risk": "medium",
-      "validation": "CLI smoke can create a session, send a prompt, stream events, and answer one permission prompt."
+      "validation": "CLI tests cover API calls, command parsing, renderers, permission replies, human-input replies, and diff preview; CLI smoke validates deterministic commands without requiring model generation."
     },
     {
       "id": "web_desktop_session_flow",

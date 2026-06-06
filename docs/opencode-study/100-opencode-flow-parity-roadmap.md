@@ -2,43 +2,41 @@
 
 Generated: 2026-06-06
 
-Baseline: `f7b1ad1 Add queue worker observability dashboard`
+Baseline: `76cb5e6 Fix GitHub CI observability smoke Python lookup`
 
 This roadmap compares product and runtime flows against OpenCode-style local coding-agent behavior. It is a parity study only; the project should keep its own product identity, implementation choices, and copy.
 
 ## Current Read
 
-Overall parity is approximately 64%. The strongest areas are queue/worker observability, permission resume, real stdio MCP, and real-or-fallback LSP code intelligence. The weakest areas are CLI/TUI coding flow, GitHub automation, product polish, provider routing, and safe executable plugin flow.
+Overall parity is approximately 69%. The strongest areas are CI/release validation, queue/worker observability, permission resume, real stdio MCP, and real-or-fallback LSP code intelligence. The weakest areas are still full-screen terminal polish, provider routing, safe executable plugin flow, and production auth/config hardening.
 
-The previous highest-value batch, queue/worker dashboard observability, is already complete in `f7b1ad1`. The next highest-value batch selected for this pass is artifact/session observability because it completes the operator story around queued work: once a run finishes, users need to see what outputs were produced without exposing object-store internals.
+The previous highest-value batches, queue/worker observability, artifact/session observability, Windows validation, and GitHub CI, are complete. The selected batch for this pass is the local terminal-first coding loop because the runtime is now validated enough to expose a keyboard-native operator path.
 
 ## Selected Batch
 
-Batch: Artifact/session observability plus worker stats alias.
+Batch: Terminal-first CLI/TUI coding flow.
 
 Why this batch:
 
-- It builds directly on the queue dashboard shipped in `f7b1ad1`.
-- It is local-first and Windows-safe.
-- It improves release confidence without requiring new credentials, external services, or unsafe plugin execution.
-- It removes a product/security footgun where the dashboard displayed artifact storage object keys.
+- It uses the existing Python backend runtime instead of adding a parallel execution path.
+- It is local-first, Windows-safe, and Docker-compatible.
+- It gives operators a keyboard-native flow for sessions, agents, prompts, events, permissions, human input, queue status, and artifacts.
+- It avoids cloud providers, GitHub bot behavior, and model-dependent smoke success.
 
 Implemented in this worktree:
 
-- Safe artifact serialization that omits `bucket` and `object_key`.
-- Redacted artifact metadata for obvious sensitive keys.
-- `GET /artifacts/{id}`.
-- `GET /sessions/{id}/artifacts`.
-- `GET /workers/stats`.
-- Dashboard session detail artifact visibility.
-- Dashboard artifact cards based on safe metadata and download status.
-- Focused backend regression tests for artifact detail, session filtering, redaction, and worker stats.
+- `backend.app.cli` package with Typer commands, `httpx` API client, `websockets` session stream client, Rich rendering, diff preview helpers, and a lightweight Rich TUI loop.
+- Commands for health, agents, session list/create/show, chat, queue status, artifact listing, and TUI.
+- Terminal handlers for permission approval/denial and human-input answer/cancel flows.
+- File mutation diff preview rendering for `write.file`, `edit.file`, and `patch.apply` metadata when available, with an honest unavailable fallback.
+- `scripts/cli-tui-smoke.ps1` for deterministic PowerShell validation.
+- Headless tests for client calls, command parsing, renderers, permission prompts, human-input prompts, and diff preview.
 
 ## Flow Matrix Summary
 
 | Flow | Status | Parity |
 | --- | --- | ---: |
-| CLI/TUI coding flow | Missing | 20% |
+| CLI/TUI coding flow | Partial | 58% |
 | Web/Desktop session flow | Partial | 72% |
 | Agent flow | Partial | 62% |
 | Tool flow | Partial | 70% |
@@ -48,7 +46,7 @@ Implemented in this worktree:
 | Plugin flow | Partial | 58% |
 | Memory/compaction flow | Partial | 66% |
 | Queue/worker flow | Strong partial | 80% |
-| GitHub workflow | Missing | 25% |
+| GitHub workflow | Strong partial | 72% |
 | Provider/model flow | Partial | 56% |
 | Config/project flow | Partial | 60% |
 | Artifact/report flow | Partial | 68% |
@@ -58,8 +56,8 @@ See `docs/opencode-study/flow-parity-matrix.json` for evidence files, reference 
 
 ## Top 10 Remaining Gaps
 
-1. CLI/TUI session loop for keyboard-native coding.
-2. GitHub Actions CI for backend, frontend, migrations, and smoke scripts.
+1. Full-screen modal TUI polish for keyboard-native coding.
+2. Push-driven event cursor replay and richer terminal message-part rendering.
 3. Safe artifact download or signed URL path when object storage is configured.
 4. HTTP/SSE MCP transport and auth flow.
 5. Process-isolated plugin execution boundary.
@@ -67,20 +65,19 @@ See `docs/opencode-study/flow-parity-matrix.json` for evidence files, reference 
 7. Provider capability matrix and model-routing policy.
 8. Project/workspace settings editor with redacted secret handling.
 9. Push-driven runtime updates instead of polling-only queue/worker status.
-10. Product polish pass for encoding drift, empty/loading states, and keyboard accessibility.
+10. Product polish pass for encoding drift, empty/loading states, terminal keyboard accessibility, and web keyboard accessibility.
 
 ## Recommended Next Batch
 
-Next after this batch: GitHub CI and smoke automation.
+Next after this batch: full terminal TUI polish and project/workspace settings.
 
-Reason: The platform now has enough runtime surface area that release confidence depends on repeatable CI, not only local validation. CI should run compile, Ruff, pytest, frontend build, migration smoke, and selected Docker-backed smokes behind explicit environment gates.
+Reason: Batch 1 proves a terminal-first path through existing APIs. The next improvement is a richer modal terminal layout, cursor-aware replay, session switching, and project/workspace scoping before adding more external integration surface.
 
 Validation target:
 
 - Backend compile and Ruff.
 - Full backend tests with Windows-safe temp override.
 - Frontend build.
-- Alembic upgrade head.
 - Docker compose config.
-- Queue worker smoke.
-- Artifact/session observability smoke once a live backend is running.
+- CLI health/agents/session smoke.
+- Manual TUI smoke against a live backend.

@@ -1,5 +1,39 @@
 # Implementation Roadmap
 
+# CLI/TUI Coding Flow Batch 1 Implementation Result
+
+## Terminal runtime status
+
+- Added `backend.app.cli` as a package with a Typer command surface, preserving the existing `serve` and `migrate` operations.
+- Added `health`, `agents`, `sessions list/create/show`, `chat`, `queue status`, `artifacts list`, and `tui` commands.
+- Added the `agentv2` console script alias while keeping `agent-platform` compatible.
+
+## API and event client status
+
+- Added a lightweight `httpx` client for existing backend APIs: health, agents, sessions, messages, events, permissions, human input, queue jobs, queue stats, and artifacts.
+- Added a `websockets` session event stream client for `/ws/sessions/{session_id}` with reconnect backoff and terminal event stopping.
+- The CLI remains a client only; it does not duplicate backend execution logic or bypass `ToolExecutor`.
+
+## Terminal UX status
+
+- Added Rich renderers for health, agents, sessions, queue jobs, artifacts, messages, tool calls, errors, permission prompts, human-input prompts, and event timelines.
+- Added terminal permission handlers for approve, deny, and details.
+- Added terminal human-input handlers for choices, free text, and cancellation.
+- Added diff preview helpers for `write.file`, `edit.file`, and `patch.apply`; if backend metadata does not include a diff, the terminal reports that the diff preview is unavailable instead of inventing one.
+- Added a minimal Rich TUI loop for session listing, session creation/opening, agent switching, prompt sending, and queue/session status.
+
+## Smoke and tests
+
+- Added `scripts/cli-tui-smoke.ps1` for deterministic PowerShell validation without requiring model generation.
+- Added `backend/tests/test_cli_flow.py` covering API client calls, command parsing, render output, permission approve/deny handlers, human-input answer/cancel handlers, and diff preview extraction.
+
+## Remaining CLI/TUI gaps
+
+- The TUI is intentionally minimal Rich-based Batch 1 rather than a full Textual modal application.
+- Live chat depends on the backend worker/model path exactly like the web UI; the deterministic smoke does not claim model generation success.
+- Permission diff preview is shown when event/request metadata includes it; richer backend-generated diffs for every mutation tool remain a future polish item.
+- Cursor-aware WebSocket replay and full keyboard session switching are future Batch 2 work.
+
 # Immediate P0 tasks
 
 1. Configuration system

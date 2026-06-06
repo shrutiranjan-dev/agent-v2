@@ -269,6 +269,17 @@ class ToolExecutor:
             return ToolExecutionOutcome(status="denied", tool_call=call, error=decision.reason)
 
         if decision.action == PermissionAction.ASK:
+            permission_metadata = {
+                "tool": tool_name,
+                "reason": decision.reason,
+                "input_hash": digest,
+                **_permission_preview_metadata(
+                    tool_name=tool_name,
+                    permission_key=decision.permission_key,
+                    input_json=input_json,
+                    risk_level=tool.risk_level,
+                ),
+            }
             request = await permission_service.create_request(
                 db,
                 PermissionRequestCreate(
@@ -281,7 +292,7 @@ class ToolExecutor:
                     permission_key=decision.permission_key,
                     resource=decision.resource,
                     input_json=input_json,
-                    metadata_json={"tool": tool_name, "reason": decision.reason, "input_hash": digest},
+                    metadata_json=permission_metadata,
                     requested_by_user_id=user_id,
                 ),
             )
@@ -699,3 +710,44 @@ class ToolExecutor:
 
 
 tool_executor = ToolExecutor()
+
+
+def _permission_preview_metadata(
+    *,
+    tool_name: str,
+    permission_key: str,
+    input_json: dict[str, Any],
+    risk_level: str,
+) -> dict[str, Any]:
+    if permission_key not in {"write.file", "edit.file", "patch.apply"}:
+        return {}
+    target_paths = _target_paths_for_preview(tool_name=tool_name, input_json=input_json)
+    diff_preview = None
+    if tool_name == "patch.apply" and isinstance(input_json.get("patch_text"), str):
+        diff_preview = redact_text(input_json["patch_text"][:12000])
+    return {
+        "operation_type": {
+            "write.file": "write",
+            "edit.file": "edit",
+            "patch.apply": "patch",
+        }.get(permission_key, permission_key),
+        "target_paths": target_paths,
+        "risk_level": risk_level,
+        "diff_preview": diff_preview,
+    }
+
+
+def _target_paths_for_preview(*, tool_name: str, input_json: dict[str, Any]) -> list[str]:
+    if tool_name in {"write.file", "edit.file"} and isinstance(input_json.get("path"), str):
+        return [input_json["path"]]
+    if tool_name == "patch.apply" and isinstance(input_json.get("patch_text"), str):
+        paths: list[str] = []
+        for line in input_json["patch_text"].splitlines():
+            if line.startswith(("*** Add File: ", "*** Update File: ", "*** Delete File: ")):
+                paths.append(line.split(": ", 1)[1].strip())
+            elif line.startswith(("--- ", "+++ ")):
+                raw = line[4:].strip().split("\t", 1)[0]
+                if raw != "/dev/null":
+                    paths.append(raw[2:] if raw.startswith(("a/", "b/")) else raw)
+        return list(dict.fromkeys(paths))
+    return []
