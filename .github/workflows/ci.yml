@@ -236,7 +236,7 @@ jobs:
       - name: Pin real LSP command to repo wrapper
         run: |
           chmod +x scripts/run-pylsp.sh
-          echo "AP_LSP_PYTHON_COMMAND=${GITHUB_WORKSPACE}/scripts/run-pylsp.sh" >> "$GITHUB_ENV"
+          echo "AP_LSP_PYTHON_COMMAND=bash ${GITHUB_WORKSPACE}/scripts/run-pylsp.sh" >> "$GITHUB_ENV"
       - name: Install backend + real LSP dependencies
         run: |
           python -m pip install --upgrade pip
