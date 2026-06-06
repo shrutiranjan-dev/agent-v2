@@ -243,11 +243,31 @@ jobs:
           print("cli-tui import smoke ok")
           PY
       - name: Verify CLI help lists the --check flag
+        # Use Python (not grep) to check for the --check flag in tui --help.
+        # Click/Typer help formatting varies by version (option names can
+        # be wrapped, ANSI-styled, or split across continuation lines),
+        # and grep on a redirected file is fragile across platforms and
+        # library versions. A Python substring check handles all of those
+        # and surfaces the actual help on failure.
         run: |
           set -euo pipefail
-          python -m backend.app.cli.main --help > /tmp/agent-cli-help.txt
-          python -m backend.app.cli.main tui --help > /tmp/agent-cli-tui-help.txt
-          grep -q -- "--check" /tmp/agent-cli-tui-help.txt
+          python - <<'PY'
+          import subprocess
+          import sys
+
+          result = subprocess.run(
+              [sys.executable, "-m", "backend.app.cli.main", "tui", "--help"],
+              capture_output=True,
+              text=True,
+          )
+          if "--check" not in result.stdout:
+              print("STDOUT:")
+              print(result.stdout)
+              print("STDERR:")
+              print(result.stderr)
+              raise SystemExit("tui --help did not advertise --check")
+          print("tui --help advertises --check")
+          PY
       - name: Apply migrations
         run: bash scripts/db-migration-smoke.sh
       - name: Start backend
