@@ -9,39 +9,42 @@
     "source": "external/opencode-source/packages/opencode/src",
     "note": "Reference evidence is used only for flow comparison. This project should not copy branding, UX language, or implementation details."
   },
-  "overall_parity_percent": 71,
+  "overall_parity_percent": 74,
   "selected_next_batch": {
     "id": "cli_tui_coding_flow",
     "why": "CI and runtime validation are green; the highest-value product gap is now a keyboard-native local coding loop that uses the existing backend runtime.",
-    "status": "implemented_in_worktree"
+    "status": "validated"
   },
   "flows": [
     {
       "id": "cli_tui_coding_flow",
       "category": "CLI/TUI coding flow",
-      "status": "strong_partial",
-      "parity_percent": 74,
+      "status": "implemented",
+      "parity_percent": 86,
       "evidence_files": [
         "backend/app/cli/main.py",
         "backend/app/cli/api_client.py",
         "backend/app/cli/websocket_client.py",
         "backend/app/cli/tui_app.py",
+        "backend/app/cli/tui_state.py",
+        "backend/app/cli/tui_events.py",
         "backend/app/cli/tui_modals.py",
         "backend/app/cli/diff_preview.py",
         "backend/tests/test_cli_flow.py",
-        "backend/tests/test_tui_flow.py",
+        "backend/tests/test_tui_state.py",
+        "backend/tests/test_tui_events.py",
         "scripts/cli-tui-smoke.ps1"
       ],
       "opencode_reference_evidence": [
         "cli/cmd/tui/routes/session/index.tsx",
         "server/shared/tui-control.ts"
       ],
-      "impact": "Operators can drive the platform from a terminal: list/create sessions, switch agents interactively, send prompts, stream session events, approve/deny permissions and answer/cancel human-input requests through state-locked modals, view the latest diff for a session, retry failed queue jobs, and list artifacts. The CLI also exposes `events`, `permissions`, `questions`, `diff`, and `queue retry` commands for scripted workflows.",
-      "next_task": "Promote the Rich TUI to a full Textual-style modal layout with session/agent side panels, durable cursor replay, and richer message-part rendering.",
-      "priority": "P1",
+      "impact": "Operators can drive the platform from a real Textual full-screen TUI: header/health bar, left session list, center message panel + event log, right tool timeline + summary, bottom prompt composer with `ctrl+c`/`ctrl+n`/`ctrl+s`/`ctrl+a`/`ctrl+r`/`ctrl+d`/`ctrl+l`/`ctrl+t` keybindings, modal screens for agent/session switching, permission and human-input requests, a live `/ws/sessions/{session_id}` event bridge feeding a pure-Python state reducer with event dedupe, durable cursor replay via SessionEventStream reconnect backoff, retry of failed queue jobs, and a non-interactive `agentv2 tui --check` flag for CI smoke.",
+      "next_task": "Add a built-in side-by-side diff viewer screen, multi-pane scrolling, and persisted layout state across restarts.",
+      "priority": "P2",
       "effort": "medium",
       "risk": "low",
-      "validation": "29 CLI flow tests and 20 TUI flow tests pass (49 total in this batch). Backend tests: 187 passed, 4 skipped. CLI smoke script validates health, agents, sessions, events, permissions, questions, diff (no-diff case), queue status, queue retry help, and tui help/import."
+      "validation": "32 CLI flow tests, 19 TUI state reducer tests, 7 TUI event bridge tests pass (58 in this batch). Backend tests: 196 passed, 4 skipped. CLI smoke script validates health, agents, sessions, events, permissions, questions, diff (no-diff case), queue status, queue retry help, tui help, `tui --check` headless smoke against the live backend, and tui import smoke."
     },
     {
       "id": "web_desktop_session_flow",

@@ -203,30 +203,33 @@ agentv2 health
 agentv2 tui
 ```
 
-TUI commands (Rich-based REPL with state-locked modals):
+TUI (`agentv2 tui`):
+
+The runtime TUI is a Textual full-screen application. The left column lists
+sessions; the center shows the message panel above the event log; the right
+column shows the tool timeline and a summary; the bottom row hosts the prompt
+composer. A live WebSocket event stream feeds a pure-Python state reducer, and
+modal screens cover permission, human-input, agent-switcher, and session-create
+flows.
+
+Keybindings:
 
 ```text
-help                    Show this help text.
-health                  Show backend health.
-agents                  List available agents.
-agent                   Open the agent switcher.
-agent <id>              Set the active agent by id.
-sessions                List sessions.
-new                     Create a new session.
-use <id>                Switch to an existing session.
-events                  Show recent events for the active session.
-permissions             Show pending permission requests.
-questions               Show pending human-input requests.
-approve <id>            Approve a permission request.
-deny <id>               Deny a permission request.
-answer <id> <text>      Answer a human-input request.
-diff                    Show the latest diff (active session).
-diff <id>               Show the latest diff for a session id.
-retry                   Retry the latest failed job (active session).
-retry <job_id>          Retry a specific queue job.
-status                  Show sessions and queue status.
-send <prompt>           Send a prompt to the active session.
-quit                    Exit the TUI.
+ctrl+c    Quit the TUI.
+ctrl+n    Create a new session.
+ctrl+s    Focus the session list.
+ctrl+a    Open the agent switcher.
+ctrl+r    Retry the latest failed queue job.
+ctrl+d    Show the latest diff for the active session.
+ctrl+l    Clear the message panel.
+ctrl+t    Toggle the event log.
+```
+
+Headless CI smoke:
+
+```powershell
+# Exit 0 = ok, exit 2 = backend unreachable, exit 1 = app construction failed.
+agentv2 tui --check
 ```
 
 The deterministic smoke script avoids model-dependent generation and exercises

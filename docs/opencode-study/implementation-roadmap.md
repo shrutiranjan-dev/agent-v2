@@ -1322,3 +1322,47 @@
 - `events`, `permissions`, and `questions` rely on the same `events_table` renderer; a dedicated TUI live-stream would be a stronger follow-up.
 - Retry remains an explicit operator action: there is no automatic retry from a session event, only the manual `retry` / `queue retry` path. The backend already supports retry, so this is a UX gap, not a capability gap.
 
+# CLI/TUI Coding Flow Batch 3 Implementation Result
+
+The Batch 2 follow-up still left the TUI as a Rich-based REPL with one-file state. Batch 3 promotes the TUI to a real Textual full-screen application driven by a pure-Python state reducer and a WebSocket event bridge. The Rich-based modals from Batch 2 are kept as fallback renderers for the legacy `tui_modals` import surface (used by tests), but the runtime now composes Textual `ModalScreen` subclasses for permission, human-input, agent switching, and session creation prompts.
+
+## Files
+
+- `backend/app/cli/tui_state.py` (new): pure-Python state reducer with `TuiState` dataclass, `apply_event`, `select_session`, `select_agent`, `set_agents`, `set_sessions`, `record_error`, `clear_transient_state_for_session_switch`, `mark_connection`, `set_health`, and bounded deques for messages / events / tool calls / queue jobs. Event dedupe is scoped by event type so that `permission.requested` and `permission.approved` for the same id are not collapsed. Permission and human-input request lifecycle is encoded in the reducer.
+- `backend/app/cli/tui_events.py` (new): `TuiEventBridge` connects to the existing `SessionEventStream` for `/ws/sessions/{session_id}`, applies reconnect backoff, dispatches events into the reducer, exposes `attach_session`, `stop`, `feed_for_tests`, and an injectable stream factory for tests.
+- `backend/app/cli/tui_app.py` (rewritten): Textual `App` `AgentPlatformTuiApp` with header/health bar, left `SessionList`, center `MessagePanel` + `EventLog`, right `ToolTimeline` + summary, bottom `PromptBar` with `Input` and `Button` submit, modal screens `PermissionModalScreen`, `HumanInputModalScreen`, `AgentSwitcherModalScreen`, `SessionCreateModalScreen`, plus `ctrl+c`/`ctrl+n`/`ctrl+s`/`ctrl+a`/`ctrl+r`/`ctrl+d`/`ctrl+l`/`ctrl+t` keybindings. `run_tui` is kept as the entrypoint. `run_tui_check` provides a headless smoke that composes the app and hits the backend reducer.
+- `backend/app/cli/main.py`: `tui` Typer command gained a `--check` flag that runs `run_tui_check` and exits with `0` (ok), `1` (app failed to construct), or `2` (backend unreachable).
+- `backend/app/cli/tui_modals.py` (kept): Rich-based modals remain for the legacy import surface used by tests and the `cli-tui-smoke.ps1` import smoke.
+- `backend/tests/test_tui_state.py` (new, 19 tests): reducer behaviour for every event type, dedupe, queue job upsert, agent selection, session switch, transient reset, snapshot.
+- `backend/tests/test_tui_events.py` (new, 7 tests): event bridge feed path, notifier, stop idempotency, attach session through injected stream factory, attach None session marks DISCONNECTED.
+- `backend/tests/test_cli_flow.py` (extended): added `tui --check` flag tests, `run_tui_check` headless success and backend-error paths, `_FakeStateClient` got a `health()` method, replaced the removed `_TuiState` tests with new `TuiState` reducer tests.
+- `backend/tests/test_tui_flow.py` (removed): the old test module referenced the removed `_TuiState` and `_show_diff_for_session` symbols; it is superseded by `test_tui_state.py` and `test_tui_events.py`.
+- `pyproject.toml`: added `textual>=8.0.0` to runtime dependencies.
+- `scripts/cli-tui-smoke.ps1`: added the `tui --check` step (must exit 0/2) and updated the import smoke to load the new modules.
+- `docs/opencode-study/flow-parity-matrix.json`: `cli_tui_coding_flow` moved from `strong_partial` @ 74% to `implemented` @ 86% with new evidence files (`tui_state.py`, `tui_events.py`, `test_tui_state.py`, `test_tui_events.py`). Overall parity moved from 71% to 74%.
+- `docs/opencode-study/100-opencode-flow-parity-roadmap.md`: status table and narrative updated to reflect the Batch 3 promotion.
+- `docs/opencode-study/polish-needed.md`: CLI/TUI entry updated to reflect the Batch 3 follow-up.
+- `README.md`: TUI section now documents the new keybindings and `--check` flag.
+
+## Live stream
+
+The Textual app uses the existing `SessionEventStream` (exponential backoff, configurable reconnect attempts) over the configured `AP_CLI_WS_URL` (defaults to `ws://localhost:8000`). The bridge feeds events into the reducer; the reducer is read by the app on every render pass. The bridge supports reconnect replays without double-printing because events are deduped by `id` (scoped by event type) and by `(type, created_at, payload_hash)`.
+
+## Non-interactive CI smoke
+
+`agentv2 tui --check` constructs `AgentPlatformTuiApp` (proving all Textual widgets compose), then calls `/health`, `/agents`, and `/sessions` through the existing `AgentApiClient`, writes one summary line to stdout, and exits 0 (ok) / 1 (app failed to construct) / 2 (backend unreachable). The smoke script in `scripts/cli-tui-smoke.ps1` runs this step before the import smoke.
+
+## Validation
+
+- `python -m compileall -q backend/app` clean.
+- `python -m ruff check backend/app backend/tests` clean.
+- `python -m pytest backend/tests` 196 passed, 4 skipped (up from 187 in Batch 2 baseline).
+- `python -m backend.app.cli.main tui --check` exits 0 with `tui-check ok: health=ok agents=6 sessions=10 active_agent=build` against the live backend.
+- `powershell scripts/cli-tui-smoke.ps1` passes all steps including the new `tui --check` and updated import smoke.
+
+## Remaining gaps
+
+- The TUI layout still has a single message panel + event log column; a future batch could split the event log into a tabbed view (events / tool calls / queue) and persist layout state.
+- The Textual app's CSS uses theme variables (`$accent`, `$surface`, `$boost`); a future batch could expose a settings file for custom themes.
+- Permission and human-input modals pop on demand but the auto-pop watcher from a live event stream is wired through a single reducer field; a future batch could add a notification bar that surfaces pending requests before the modal pops.
+

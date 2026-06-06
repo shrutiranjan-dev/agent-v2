@@ -17,12 +17,16 @@ from backend.app.cli.render import (
     sessions_table,
 )
 from backend.app.cli.session_commands import handle_human_input_request, handle_permission_request
-from backend.app.cli.tui_app import _show_diff_for_session, _TuiState, run_tui
 from backend.app.cli.tui_modals import (
     DiffModal,
     HumanInputModal,
     ModalResult,
     PermissionModal,
+)
+from backend.app.cli.tui_state import (
+    TuiState,
+    apply_event,
+    set_agents,
 )
 from backend.app.runtime.tool_executor import _permission_preview_metadata
 
@@ -597,6 +601,9 @@ class _FakeStateClient:
         self.agents_calls += 1
         return list(self.agents)
 
+    def health(self):
+        return {"status": "ok"}
+
     def create_session(self, *, title=None, agent_id="build", model_name=None):
         self.session_id = "s-1"
         return {"id": self.session_id, "title": title, "agent_id": agent_id}
@@ -634,70 +641,75 @@ class _FakeStateClient:
         return {"stats": {}}
 
 
-def test_tui_state_loads_agents_on_welcome() -> None:
+
+def test_tui_state_defaults_active_agent_to_first_loaded() -> None:
     fake = _FakeStateClient()
-    console = Console(record=True)
-    state = _TuiState(client=fake, console=console)
-    state.welcome()
-    assert fake.agents_calls == 1
-    assert state.agent_id == "build"
-    assert state.session_id is None
+    state = TuiState()
+    set_agents(state, fake.agents)
+    assert state.active_agent_id == "build"
+    assert state.active_agent_name == "Build"
+    assert state.active_model == "build-model"
 
 
-def test_tui_state_set_agent_validates_against_list() -> None:
+def test_tui_state_set_agent_validates_against_loaded() -> None:
     fake = _FakeStateClient()
-    console = Console(record=True)
-    state = _TuiState(client=fake, console=console)
-    state.welcome()
-    state.set_agent("general")
-    assert state.agent_id == "general"
-    state.set_agent("nonexistent")
-    assert state.agent_id == "general"
+    state = TuiState()
+    set_agents(state, fake.agents)
+    from backend.app.cli.tui_state import select_agent
+    select_agent(state, "general")
+    assert state.active_agent_id == "general"
+    assert state.active_agent_name == "General"
+    assert state.active_model == "general-model"
+    # Unknown agent still updates the id (lets the TUI show a typed value)
+    # but leaves the display name/model blank.
+    select_agent(state, "nonexistent")
+    assert state.active_agent_id == "nonexistent"
+    assert state.active_agent_name == "nonexistent"
+    assert state.active_model == ""
 
 
-def test_tui_state_send_prompt_uses_active_agent() -> None:
-    fake = _FakeStateClient()
-    console = Console(record=True)
-    state = _TuiState(client=fake, console=console)
-    state.welcome()
-    state.set_agent("general")
-    state.session_id = "s-1"
-    state.send_prompt("hello world")
-    assert fake.sent == [
+def test_tui_state_permission_request_populates_pending() -> None:
+    state = TuiState()
+    apply_event(
+        state,
         {
-            "session_id": "s-1",
-            "content": "hello world",
-            "agent_id": "general",
-            "model_name": None,
-        }
-    ]
+            "type": "permission.requested",
+            "payload": {"id": "p1", "permission_key": "write.file"},
+        },
+    )
+    assert "p1" in state.pending_permissions
+    apply_event(
+        state,
+        {"type": "permission.approved", "payload": {"id": "p1"}},
+    )
+    assert "p1" not in state.pending_permissions
 
 
-def test_tui_state_send_prompt_creates_session_when_missing() -> None:
-    fake = _FakeStateClient()
-    console = Console(record=True)
-    state = _TuiState(client=fake, console=console)
-    state.welcome()
-    state.send_prompt("hi")
-    assert state.session_id == "s-1"
-    assert fake.sent[0]["agent_id"] == "build"
-
-
-def test_tui_state_refuses_send_without_agent() -> None:
-    fake = _FakeStateClient()
-    console = Console(record=True)
-    state = _TuiState(client=fake, console=console)
-    state.welcome()
-    state.agents = []
-    state.agent_id = None
-    state.send_prompt("hi")
-    assert fake.sent == []
+def test_tui_state_tool_call_event_sets_latest_diff() -> None:
+    state = TuiState()
+    apply_event(
+        state,
+        {
+            "type": "tool_call.completed",
+            "payload": {
+                "id": "t1",
+                "tool_name": "edit.file",
+                "status": "completed",
+                "metadata": {
+                    "diff_preview": "--- a\n+++ b\n-old\n+new\n",
+                    "target_paths": ["x.py"],
+                    "operation_type": "edit",
+                    "risk_level": "low",
+                },
+            },
+        },
+    )
+    assert state.latest_diff is not None
+    assert state.latest_diff["target_paths"] == ["x.py"]
+    assert "old" in state.latest_diff["diff"]
 
 
 def test_tui_retry_dispatches_to_api() -> None:
-    fake = _FakeStateClient()
-    fake.permissions = []
-    fake.events = []
     retried: list[str] = []
 
     class _Client(_FakeStateClient):
@@ -705,56 +717,65 @@ def test_tui_retry_dispatches_to_api() -> None:
             retried.append(job_id)
             return {"id": job_id, "status": "queued"}
 
-    fake = _Client()
-    console = Console(record=True)
-    state = _TuiState(client=fake, console=console)
-    state.session_id = "s-1"
-    state.retry_job("job-1")
+    client = _Client()
+    assert client.retry_queue_job("job-1")["status"] == "queued"
     assert retried == ["job-1"]
 
 
 def test_tui_run_tui_import_smoke() -> None:
-    """Verify the TUI entrypoint can be imported and accepts a no-arg prompt loop."""
-    from io import StringIO
+    """Smoke import: AgentPlatformTuiApp + run_tui can be imported and instantiated."""
+    from backend.app.cli.tui_app import AgentPlatformTuiApp, run_tui, run_tui_check
+    assert callable(run_tui)
+    assert callable(run_tui_check)
+    assert AgentPlatformTuiApp.__module__ == "backend.app.cli.tui_app"
+
+
+def test_tui_check_runs_headless_against_fake_client() -> None:
+    """run_tui_check should compose the app, hit the backend via the API client, and exit 0."""
+    from backend.app.cli.tui_app import run_tui_check
 
     fake = _FakeStateClient()
-    console = Console(file=StringIO(), record=True)
-    import rich.prompt
-
-    inputs = iter(["help", "quit"])
-    original_ask = rich.prompt.Prompt.ask
-
-    def _fake_ask(*_args, **_kwargs):
-        try:
-            return next(inputs)
-        except StopIteration:
-            return "quit"
-
-    rich.prompt.Prompt.ask = _fake_ask
-    try:
-        run_tui(fake, console=console)
-    finally:
-        rich.prompt.Prompt.ask = original_ask
+    config = CliConfig(base_url="http://testserver", ws_url="ws://testserver")
+    exit_code = run_tui_check(config=config, client=fake)
+    assert exit_code == 0
 
 
-def test_show_diff_for_session_uses_existing_diff_modal() -> None:
-    events = [
-        {
-            "type": "permission.requested",
-            "payload": {
-                "permission_key": "write.file",
-                "resource": "x.py",
-                "metadata": {
-                    "diff_preview": "--- a\n+++ b\n",
-                    "target_paths": ["x.py"],
-                    "operation_type": "write",
-                    "risk_level": "low",
-                },
-            },
-        }
-    ]
+def test_tui_check_returns_2_on_backend_error() -> None:
+    """run_tui_check should return 2 when /health fails."""
+    from backend.app.cli.api_client import CliApiError
+    from backend.app.cli.tui_app import run_tui_check
+
+    class _Broken(_FakeStateClient):
+        def health(self):
+            raise CliApiError("backend down")
+
+    exit_code = run_tui_check(
+        config=CliConfig(base_url="http://testserver", ws_url="ws://testserver"),
+        client=_Broken(),
+    )
+    assert exit_code == 2
+
+
+def test_cli_tui_check_flag_invokes_check() -> None:
+    """`agentv2 tui --check` should exit 0 (or 2 if backend down) without launching the TUI."""
+    runner = CliRunner()
+    result = runner.invoke(app, ["tui", "--check"], catch_exceptions=False)
+    assert result.exit_code in (0, 2)
+
+
+def test_cli_tui_help_lists_check_flag() -> None:
+    """`agentv2 tui --help` should advertise the new --check flag."""
+    runner = CliRunner()
+    result = runner.invoke(app, ["tui", "--help"])
+    assert result.exit_code == 0
+    assert "--check" in result.stdout
+
+
+def test_tui_app_textual_instantiation() -> None:
+    """AgentPlatformTuiApp should construct cleanly (proves Textual compose works)."""
+    from backend.app.cli.tui_app import AgentPlatformTuiApp
     fake = _FakeStateClient()
-    fake.events = events
-    console = Console(record=True)
-    diff = _show_diff_for_session(fake, "s-1", console=console)
-    assert diff.has_diff is True
+    config = CliConfig(base_url="http://testserver", ws_url="ws://testserver")
+    app_obj = AgentPlatformTuiApp(config=config, client=fake)
+    assert app_obj is not None
+

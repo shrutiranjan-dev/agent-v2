@@ -8,13 +8,13 @@ This roadmap compares product and runtime flows against OpenCode-style local cod
 
 ## Current Read
 
-Overall parity is approximately 71%. The strongest areas are CI/release validation, queue/worker observability, the now-fully-wired CLI/TUI coding flow, permission resume, real stdio MCP, and real-or-fallback LSP code intelligence. The weakest areas are still full-screen terminal polish, provider routing, safe executable plugin flow, and production auth/config hardening.
+Overall parity is approximately 74%. The strongest areas are CI/release validation, queue/worker observability, the now-promoted CLI/TUI coding flow (Textual full-screen runtime), permission resume, real stdio MCP, and real-or-fallback LSP code intelligence. The weakest areas are still provider routing, safe executable plugin flow, and production auth/config hardening.
 
-The previous highest-value batches, queue/worker observability, artifact/session observability, Windows validation, and GitHub CI, are complete. The selected batch for this pass is the local terminal-first coding loop because the runtime is now validated enough to expose a keyboard-native operator path. The follow-up CLI/TUI Batch 2 closes the audit gaps from the earlier "Polish OpenCode-style interactive TUI flow" commit (`d8261be`) by adding the missing commands, the real modal state machine, and the real retry wiring.
+The previous highest-value batches, queue/worker observability, artifact/session observability, Windows validation, GitHub CI, and CLI/TUI Batch 1+2, are complete. CLI/TUI Batch 3 promotes the Rich REPL TUI to a real Textual full-screen app (`AgentPlatformTuiApp` with header/health bar, left session list, center message panel + event log, right tool timeline + summary, bottom prompt composer, modal screens for agent/session switching, permission and human-input requests, and `agentv2 tui --check` for CI smoke) wired to a pure-Python state reducer (`tui_state.py`) and a WebSocket event bridge (`tui_events.py`).
 
 ## Selected Batch
 
-Batch: Terminal-first CLI/TUI coding flow (Batch 1 + Batch 2 follow-up).
+Batch: Terminal-first CLI/TUI coding flow (Batch 1 + Batch 2 + Batch 3 follow-up).
 
 Why this batch:
 
@@ -38,7 +38,7 @@ Implemented in this worktree:
 
 | Flow | Status | Parity |
 | --- | --- | ---: |
-| CLI/TUI coding flow | Strong partial | 74% |
+| CLI/TUI coding flow | Implemented | 86% |
 | Web/Desktop session flow | Partial | 72% |
 | Agent flow | Partial | 62% |
 | Tool flow | Partial | 70% |
@@ -78,7 +78,7 @@ Reason: Batch 1+2 proves a terminal-first path through existing APIs and closes 
 Validation target:
 
 - Backend compile and Ruff.
-- Full backend tests with Windows-safe temp override (187 passed, 4 skipped after the CLI/TUI Batch 2 follow-up).
+- Full backend tests with Windows-safe temp override (196 passed, 4 skipped after the CLI/TUI Batch 3 follow-up).
 - Frontend build.
 - Docker compose config.
 - CLI smoke validates health, agents, sessions, events, permissions, questions, diff (no-diff case), queue status, queue retry help, tui help, and tui import smoke.

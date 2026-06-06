@@ -145,11 +145,11 @@
 - Risk if ignored: Long sessions become unreliable and local models lose operational context.
 ### TUI client
 
-- Current improvement: A Rich TUI loop with an explicit `_TuiState` class and state-locked `PermissionModal`/`HumanInputModal`/`DiffModal` modals now supports session listing/creation/opening, interactive agent switching, prompt sending, queue status, the latest diff for a session, and retrying failed queue jobs. See `docs/opencode-study/implementation-roadmap.md` for the CLI/TUI Coding Flow Batch 2 result.
-- Why it matters: Headless users can drive the platform from a terminal with state-locked modals and a real retry path.
-- Exact file(s): `backend/app/cli/tui_app.py`, `backend/app/cli/tui_modals.py`, `backend/tests/test_tui_flow.py`, `scripts/cli-tui-smoke.ps1`.
-- Exact recommended next fix: promote the Rich TUI to a Textual-style full-screen layout with session/agent side panels, cursor-aware replay, and richer message-part rendering.
-- Risk if ignored: Terminal users have a stateful, tested modal flow, but the layout is still a serial REPL instead of a full-screen coding workspace.
+- Current improvement: A Textual full-screen TUI (`AgentPlatformTuiApp`) with a pure-Python state reducer (`tui_state.py`) and a WebSocket event bridge (`tui_events.py`) now drives a header/health bar, left session list, center message panel + event log, right tool timeline + summary, bottom prompt composer, and modal screens for permission / human-input / agent-switcher / session-create flows. Keybindings: `ctrl+c` quit, `ctrl+n` new session, `ctrl+s` focus sessions, `ctrl+a` switch agent, `ctrl+r` retry, `ctrl+d` show diff, `ctrl+l` clear messages, `ctrl+t` toggle events. The CLI also gained `agentv2 tui --check` for non-interactive CI smoke. The Rich-based `tui_modals.py` from Batch 2 is retained as a fallback renderer for the legacy import surface. See `docs/opencode-study/implementation-roadmap.md` for the CLI/TUI Coding Flow Batch 3 result.
+- Why it matters: Headless users can drive the platform from a true full-screen terminal coding workspace with a real event stream and a tested state machine.
+- Exact file(s): `backend/app/cli/tui_app.py`, `backend/app/cli/tui_state.py`, `backend/app/cli/tui_events.py`, `backend/app/cli/tui_modals.py`, `backend/app/cli/main.py`, `backend/tests/test_tui_state.py`, `backend/tests/test_tui_events.py`, `backend/tests/test_cli_flow.py`, `scripts/cli-tui-smoke.ps1`, `docs/opencode-study/flow-parity-matrix.json`, `docs/opencode-study/100-opencode-flow-parity-roadmap.md`, `docs/opencode-study/implementation-roadmap.md`, `README.md`.
+- Exact recommended next fix: split the event log into a tabbed view (events / tool calls / queue), persist the TUI layout across restarts, and add a notification bar that surfaces pending permission / human-input requests before the modal pops.
+- Risk if ignored: Terminal users still get a real workspace, but the event log mixes types and the layout state is not persisted.
 
 ### Web UI dashboard
 - Current problem: Dashboard.tsx is a large single component; Polling and WebSocket state are mixed into one page

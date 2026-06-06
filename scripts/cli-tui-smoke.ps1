@@ -95,8 +95,17 @@ Assert-Exit (Invoke-Cli artifacts list) "artifacts list"
 Write-Host "[cli-tui-smoke] tui help"
 Assert-Exit (Invoke-Cli tui --help) "tui help"
 
+Write-Host "[cli-tui-smoke] tui --check (headless smoke against live backend)"
+$checkResult = Invoke-Cli-Capture tui --check
+if ($checkResult.ExitCode -notin 0, 2) {
+  throw "[cli-tui-smoke] tui --check exited with unexpected code $($checkResult.ExitCode)"
+}
+if ($checkResult.Output -notmatch "tui-check ok") {
+  throw "[cli-tui-smoke] tui --check did not print expected marker (got: $($checkResult.Output))"
+}
+
 Write-Host "[cli-tui-smoke] import smoke (no manual input required)"
-$importSmoke = & $Python -c "from backend.app.cli.tui_app import run_tui; from backend.app.cli.tui_modals import PermissionModal, HumanInputModal, DiffModal; print('tui import smoke ok')"
+$importSmoke = & $Python -c "from backend.app.cli.tui_app import AgentPlatformTuiApp, run_tui, run_tui_check; from backend.app.cli.tui_state import TuiState, apply_event; from backend.app.cli.tui_events import TuiEventBridge; from backend.app.cli.tui_modals import PermissionModal, HumanInputModal, DiffModal; print('tui import smoke ok')"
 if ($LASTEXITCODE -ne 0) {
   throw "[cli-tui-smoke] tui import smoke failed"
 }

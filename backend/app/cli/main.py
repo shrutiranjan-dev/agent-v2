@@ -19,7 +19,7 @@ from backend.app.cli.render import (
     sessions_table,
 )
 from backend.app.cli.session_commands import run_chat_stream
-from backend.app.cli.tui_app import run_tui
+from backend.app.cli.tui_app import run_tui, run_tui_check
 from backend.app.cli.tui_modals import DiffModal
 from backend.app.cli.websocket_client import SessionEventStream
 from backend.app.core.config import get_settings
@@ -229,8 +229,16 @@ def chat(
 
 
 @app.command()
-def tui() -> None:
-    """Start the keyboard-driven Rich TUI for sessions, agents, and queue jobs."""
+def tui(
+    check: bool = typer.Option(
+        False,
+        "--check",
+        help="Run a non-interactive TUI smoke (loads agents/sessions, prints a status line, exits).",
+    ),
+) -> None:
+    """Start the keyboard-driven Textual TUI for sessions, agents, and queue jobs."""
+    if check:
+        raise typer.Exit(code=run_tui_check())
     with _client() as client:
         run_tui(client, console=console)
 
