@@ -1,29 +1,47 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-API_BASE="${API_BASE:-http://localhost:8000}"
+API_BASE="${AP_BASE_URL:-${API_BASE:-http://localhost:8000}}"
 LSP_SMOKE_WORKSPACE_PATH="${LSP_SMOKE_WORKSPACE_PATH:-backend/app/codeintel}"
 LSP_SMOKE_FILE="${LSP_SMOKE_FILE:-backend/app/codeintel/lsp_client.py}"
 STRICT_REAL_LSP="${STRICT_REAL_LSP:-0}"
 REAL_MODE=0
 SKIP_REAL_IF_MISSING="${LSP_SMOKE_SKIP_IF_MISSING:-0}"
-for arg in "$@"; do
-  case "${arg}" in
+BACKEND_LOG_FILE="${BACKEND_LOG_FILE:-}"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
     --real) REAL_MODE=1 ;;
     --strict-real-lsp) REAL_MODE=1 ;;
     --skip-real-if-missing) SKIP_REAL_IF_MISSING=1 ;;
+    --base-url)
+      shift
+      if [[ $# -eq 0 ]]; then
+        echo "ERROR: --base-url requires a value" >&2
+        exit 2
+      fi
+      API_BASE="$1"
+      ;;
+    --base-url=*)
+      API_BASE="${1#*=}"
+      ;;
     --help|-h)
       cat <<USAGE
-usage: lsp-smoke.sh [--real] [--skip-real-if-missing]
+usage: lsp-smoke.sh [--real] [--skip-real-if-missing] [--base-url URL]
   Default mode: verify static fallback path; passes if /code/... returns 200.
   --real                   require AP_LSP_ENABLED=true with real pylsp available
   --skip-real-if-missing   in --real mode, skip (do not fail) if pylsp is missing
                            prints REAL_LSP=skipped_pylsp_missing and exits 0
+  --base-url URL           override API base URL (or set AP_BASE_URL / API_BASE)
   --strict-real-lsp        alias for --real
 USAGE
       exit 0
       ;;
+    *)
+      echo "ERROR: unknown argument: $1" >&2
+      exit 2
+      ;;
   esac
+  shift
 done
 if [[ "${REAL_MODE}" == "1" && "${STRICT_REAL_LSP}" != "1" ]]; then
   STRICT_REAL_LSP=1
@@ -37,6 +55,32 @@ else
   SMOKE_TMP_DIR_PY="${SMOKE_TMP_DIR}"
 fi
 export SMOKE_TMP_DIR SMOKE_TMP_DIR_PY LSP_SMOKE_FILE STRICT_REAL_LSP
+
+dump_diagnostics() {
+  echo "lsp smoke diagnostics:"
+  if [[ -f "${SMOKE_TMP_DIR}/lsp-health.json" ]]; then
+    echo "--- /health/codeintel ---"
+    cat "${SMOKE_TMP_DIR}/lsp-health.json"
+  fi
+  if [[ -f "${SMOKE_TMP_DIR}/lsp-symbols.json" ]]; then
+    echo "--- /code/symbols ---"
+    cat "${SMOKE_TMP_DIR}/lsp-symbols.json"
+  fi
+  if [[ -f "${SMOKE_TMP_DIR}/lsp-definition.json" ]]; then
+    echo "--- /code/definition ---"
+    cat "${SMOKE_TMP_DIR}/lsp-definition.json"
+  fi
+  if [[ -f "${SMOKE_TMP_DIR}/lsp-diagnostics.json" ]]; then
+    echo "--- /code/diagnostics ---"
+    cat "${SMOKE_TMP_DIR}/lsp-diagnostics.json"
+  fi
+  if [[ -n "${BACKEND_LOG_FILE}" && -f "${BACKEND_LOG_FILE}" ]]; then
+    echo "--- backend log tail ---"
+    tail -n 200 "${BACKEND_LOG_FILE}" || cat "${BACKEND_LOG_FILE}"
+  fi
+}
+
+trap 'status=$?; if [[ $status -ne 0 ]]; then dump_diagnostics; fi; exit $status' EXIT
 
 if [[ "$(uname -s)" != "Linux" && -x ".venv/Scripts/python.exe" ]]; then
   PYTHON_BIN=".venv/Scripts/python.exe"

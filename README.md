@@ -176,6 +176,8 @@ AP_LSP_ENABLED=true AP_LSP_PYTHON_COMMAND=pylsp \
   powershell -ExecutionPolicy Bypass -File scripts/lsp-smoke.ps1 -Real
 ```
 
+CI now includes a dedicated mandatory `real-python-lsp-smoke` job that installs `python-lsp-server`, starts the backend with `AP_LSP_ENABLED=true`, runs `scripts/lsp-smoke.sh --real`, and only passes when the smoke prints `REAL_LSP=passed`. Until that job is observed green on GitHub Actions, the docs should be treated as `REAL_LSP_CI_JOB_ADDED_PENDING_REMOTE_VALIDATION`, not `REAL_LSP_CI_VALIDATED`.
+
 ## Developer Commands
 
 ```bash

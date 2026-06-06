@@ -1036,8 +1036,8 @@
 - Current improvement: `scripts/lsp-smoke.sh` and `scripts/lsp-smoke.ps1` now accept `--real` / `-Real`; default mode prints `REAL_LSP=disabled_static_fallback`; real mode prints `REAL_LSP=passed` only after `python -c "import pylsp"` succeeds AND at least one `/code/symbols` (or `/code/definition` / `/code/diagnostics`) response body carries `source: real_lsp`. `--skip-real-if-missing` / `-SkipRealIfMissing` prints `REAL_LSP=skipped_pylsp_missing` and exits 0 when pylsp is absent. The smoke never fakes a pass.
 - Why it matters: deployment validation has a dedicated code path for real-LSP lifecycle checks and is provably honest about whether real LSP actually handled a request.
 - Exact files: `scripts/lsp-smoke.sh`, `scripts/lsp-smoke.ps1`, `scripts/codeintel-smoke.sh`, `pyproject.toml` (`[project.optional-dependencies] codeintel`).
-- Exact recommended next fix: add an opt-in CI job that runs `scripts/lsp-smoke.ps1 -Real` against a runner where `pip install -e ".[codeintel]"` and `AP_LSP_ENABLED=true AP_LSP_PYTHON_COMMAND=pylsp` are configured, so the same `REAL_LSP=passed` gate that worked in the local audit is enforced on every push. The local audit validated the Python path with `python-lsp-server 1.14.0`; CI needs the same recipe.
-- Risk if ignored: local validation proves the path; without the CI job, a future regression in the real-LSP integration could land without detection.
+- Exact recommended next fix: observe the new mandatory `real-python-lsp-smoke` GitHub Actions job turn green, then flip docs from `REAL_LSP_CI_JOB_ADDED_PENDING_REMOTE_VALIDATION` to `REAL_LSP_CI_VALIDATED`. The local audit validated the Python path with `python-lsp-server 1.14.0`; GitHub Actions now has the same recipe.
+- Risk if ignored: without confirming the remote run, the CI job exists but the claim is still not release-proven on GitHub-hosted Ubuntu.
 
 ## Queue and worker dashboard
 

@@ -1,5 +1,5 @@
 param(
-    [string]$BaseUrl = $env:AP_BACKEND_URL,
+    [string]$BaseUrl = $(if ($env:AP_BASE_URL) { $env:AP_BASE_URL } elseif ($env:API_BASE) { $env:API_BASE } else { $env:AP_BACKEND_URL }),
     [string]$WorkspacePath = $env:LSP_SMOKE_WORKSPACE_PATH,
     [string]$LspFile = $env:LSP_SMOKE_FILE,
     [string]$StrictRealLsp = $env:STRICT_REAL_LSP,

@@ -4,7 +4,7 @@ Default GitHub Actions require no repository secrets, no cloud model provider, a
 
 ## Workflows
 
-- `CI` runs on pull requests and pushes to `main`. It validates backend compile, Ruff, backend tests, frontend build, Docker Compose config, migrations against real pgvector Postgres, deterministic API smokes, and a dedicated CLI/TUI headless smoke against a live backend.
+- `CI` runs on pull requests and pushes to `main`. It validates backend compile, Ruff, backend tests, frontend build, Docker Compose config, migrations against real pgvector Postgres, deterministic API smokes, a dedicated real Python LSP smoke against a live backend, and a dedicated CLI/TUI headless smoke.
 - `Repo Hygiene` runs on pull requests and pushes to `main`. It blocks committed `.env` files, private keys, runtime folders, ignored artifact source packages, invalid flow parity JSON (matrix + verified variants), shell syntax errors, CRLF in shell scripts, PowerShell parse errors, missing `pyproject.toml`, and broken line-ending policy.
 - `Manual Smoke` runs only through `workflow_dispatch`. It builds the Docker Compose stack and runs the heavier smoke suite against live containers.
 
@@ -21,13 +21,29 @@ The deterministic smoke scripts are:
 
 - `scripts/codeintel-smoke.sh`
 - `scripts/lsp-smoke.sh` in static fallback mode (`REAL_LSP=disabled_static_fallback`)
-- `scripts/lsp-smoke.sh --real` in real mode if `python -c "import pylsp"` succeeds, otherwise `REAL_LSP=skipped_pylsp_missing` when `--skip-real-if-missing` is set
+- `scripts/lsp-smoke.sh --real` in strict real mode for the dedicated `real-python-lsp-smoke` CI job
 - `scripts/mcp-plugin-smoke.sh`
 - `scripts/observability-smoke.sh`
 - `scripts/cli-tui-smoke.ps1` (also run as a dedicated CI job)
 - `python -m backend.app.cli.main tui --check` (headless smoke)
 
 Human-input, memory-compaction, and model-generation smokes are not part of default CI because they need explicit non-production test endpoints or model/runtime prerequisites.
+
+## Real Python LSP CI Job
+
+The `real-python-lsp-smoke` job in `.github/workflows/ci.yml` is mandatory in default CI, not manual or optional.
+
+It:
+
+1. Installs backend dependencies with `pip install -e ".[test,codeintel]"`.
+2. Verifies `python -c "import pylsp"` before doing smoke work.
+3. Applies migrations against a real `pgvector/pgvector:pg16` Postgres service.
+4. Starts the backend on the runner with `AP_LSP_ENABLED=true` and `AP_LSP_PYTHON_COMMAND=pylsp`.
+5. Runs `bash scripts/lsp-smoke.sh --real --base-url http://localhost:8000`.
+6. Requires `REAL_LSP=passed` in the smoke log.
+7. Uploads the smoke log, backend log, and response dumps from `/tmp/lsp-smoke/` on failure with 7 day retention.
+
+This job is the CI proof for the already validated real Python LSP path. It does not require Ollama generation and does not pass if the runtime falls back to `static_fallback`.
 
 ## CLI/TUI CI Job
 
@@ -51,6 +67,7 @@ CI jobs upload failure artifacts (7 day retention) to the Actions run page:
 - `migration-smoke-log` from the `Migration Smoke` job (alembic + validation log).
 - `safe-smokes-backend-log` from the `Safe API Smokes` job (uvicorn log).
 - `cli-tui-smoke-backend-log` from the new `CLI/TUI Smoke` job.
+- `real-python-lsp-smoke-logs` from the `Real Python LSP Smoke` job (`lsp-smoke` output, backend log, and response dumps).
 - `repo-hygiene-log` from the `Repo Hygiene` job (parity JSON validation output).
 - `manual-smoke-docker-logs` from the `Manual Smoke` workflow (always uploaded, not just on failure).
 
@@ -159,5 +176,5 @@ bash scripts/validate-local.sh --skip-frontend --skip-tests
 
 - Human-input and memory-compaction smokes are skipped by design when `AP_ENABLE_TEST_ENDPOINTS=false`.
 - Ollama model generation is never required in default CI. The CI sets `AP_OLLAMA_BASE_URL=http://127.0.0.1:9` so any accidental model call fails fast instead of silently succeeding against a missing local model.
-- Real LSP is disabled by default unless `STRICT_REAL_LSP=1` is set and a working `pylsp` binary is present on the runner. Default CI uses the static fallback. The smoke prints `REAL_LSP=disabled_static_fallback` (default) or `REAL_LSP=passed` (after pylsp is verified to actually handle a request and at least one `/code/...` response contains `source: real_lsp`). Use `--Real` / `--real` to opt into the real-mode smoke and `--skip-real-if-missing` to print `REAL_LSP=skipped_pylsp_missing` instead of failing when `pylsp` is not installed. The smoke never claims `REAL_LSP=passed` unless the response body's `source` field is `real_lsp`.
+- Static-fallback LSP still remains the default behavior for the general `safe-smokes` job. The dedicated `real-python-lsp-smoke` job is the strict gate for the live `pylsp` path. The smoke prints `REAL_LSP=passed` only after `pylsp` is importable and at least one `/code/...` response body reports `source: real_lsp`.
 - The dedicated `cli-tui-smoke` CI job starts a real backend and runs `tui --check`. It does not launch the full Textual app (which requires a TTY); that path is covered by `AgentPlatformTuiApp` instantiation in the import check step and by the local `cli-tui-smoke.ps1` script.

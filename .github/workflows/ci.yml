@@ -193,6 +193,87 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  real-python-lsp-smoke:
+    name: Real Python LSP Smoke
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: agent_platform
+          POSTGRES_USER: agent
+          POSTGRES_PASSWORD: agent
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U agent -d agent_platform"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      AP_ENV: test
+      AP_ENABLE_TEST_ENDPOINTS: "false"
+      AP_DATABASE_URL: postgresql+asyncpg://agent:agent@localhost:5432/agent_platform
+      AP_TEST_POSTGRES_URL: postgresql+psycopg://agent:agent@localhost:5432/agent_platform
+      AP_REDIS_PUBSUB_ENABLED: "false"
+      AP_QUEUE_ENABLED: "false"
+      AP_QDRANT_ENABLED: "false"
+      AP_MEMORY_EMBEDDING_ENABLED: "false"
+      AP_OLLAMA_BASE_URL: http://127.0.0.1:9
+      AP_WORKSPACE_ROOT: ${{ github.workspace }}
+      AP_LSP_ENABLED: "true"
+      AP_LSP_PYTHON_COMMAND: pylsp
+      AP_BASE_URL: http://localhost:8000
+      API_BASE: http://localhost:8000
+      SMOKE_TMP_DIR: /tmp/lsp-smoke
+      BACKEND_LOG_FILE: /tmp/agent-backend.log
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install backend + real LSP dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[test,codeintel]"
+      - name: Verify pylsp import
+        run: python -c "import pylsp; print('pylsp ok')"
+      - name: Apply migrations
+        run: bash scripts/db-migration-smoke.sh
+      - name: Start backend
+        run: |
+          python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 > /tmp/agent-backend.log 2>&1 &
+          echo $! > /tmp/agent-backend.pid
+          for attempt in {1..60}; do
+            if curl -fsS http://localhost:8000/health >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/agent-backend.log
+          exit 1
+      - name: Run strict real LSP smoke
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/lsp-artifacts
+          bash scripts/lsp-smoke.sh --real --base-url http://localhost:8000 2>&1 | tee /tmp/lsp-artifacts/lsp-smoke.log
+          grep -q "REAL_LSP=passed" /tmp/lsp-artifacts/lsp-smoke.log
+      - name: Backend logs on failure
+        if: failure()
+        run: cat /tmp/agent-backend.log || true
+      - name: Upload real LSP logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-python-lsp-smoke-logs
+          path: |
+            /tmp/agent-backend.log
+            /tmp/lsp-artifacts/
+            /tmp/lsp-smoke/
+          if-no-files-found: ignore
+          retention-days: 7
+
   cli-tui-smoke:
     name: CLI/TUI Smoke
     runs-on: ubuntu-latest
