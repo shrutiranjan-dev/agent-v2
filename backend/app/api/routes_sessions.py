@@ -4,6 +4,8 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.app.api.routes_artifacts import serialize_artifact
+from backend.app.artifacts.artifact_service import list_artifacts
 from backend.app.core.security import TenantContext, tenant_context
 from backend.app.db.models import SystemEvent
 from backend.app.db.postgres import get_session
@@ -56,3 +58,13 @@ async def get_session_events(session_id: UUID, db: AsyncSession = Depends(get_se
         ).all()
     )
     return {"events": [event_bus.serialize(row) for row in rows]}
+
+
+@router.get("/{session_id}/artifacts")
+async def get_session_artifacts(
+    session_id: UUID,
+    limit: int = 100,
+    db: AsyncSession = Depends(get_session),
+) -> dict:
+    rows = await list_artifacts(db, session_id=session_id, limit=max(1, min(limit, 500)))
+    return {"artifacts": [serialize_artifact(row) for row in rows]}

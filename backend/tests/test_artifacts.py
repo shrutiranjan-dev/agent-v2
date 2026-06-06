@@ -75,13 +75,46 @@ def test_artifact_route_lists_metadata() -> None:
             "id": str(row.id),
             "name": "report.txt",
             "kind": "text",
-            "bucket": "artifacts",
-            "object_key": "sessions/report.txt",
+            "session_id": str(session.id),
+            "tool_call_id": None,
             "content_type": "text/plain",
             "size_bytes": 128,
+            "checksum": "abc123",
+            "metadata": {"token": "[redacted]"},
+            "download_url": None,
+            "download_status": "metadata_only",
             "created_at": row.created_at.isoformat(),
         }
     ]
+    assert "object_key" not in payload["artifacts"][0]
+    assert "bucket" not in payload["artifacts"][0]
+
+
+def test_artifact_routes_support_detail_and_session_scope() -> None:
+    session = make_session()
+    other_session = make_session()
+    row = make_artifact(session_id=session.id)
+    other_row = make_artifact(session_id=other_session.id)
+    db = FakeAsyncSession(objects=[session, other_session, row, other_row])
+    app = create_app()
+
+    async def override_get_session():
+        yield db
+
+    app.dependency_overrides[get_session] = override_get_session
+    try:
+        client = TestClient(app)
+        detail_response = client.get(f"/artifacts/{row.id}")
+        session_response = client.get(f"/sessions/{session.id}/artifacts")
+        missing_response = client.get(f"/artifacts/{uuid4()}")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert detail_response.status_code == 200
+    assert detail_response.json()["artifact"]["id"] == str(row.id)
+    assert session_response.status_code == 200
+    assert [item["id"] for item in session_response.json()["artifacts"]] == [str(row.id)]
+    assert missing_response.status_code == 404
 
 
 async def test_minio_health_reports_degraded_when_unavailable(monkeypatch) -> None:

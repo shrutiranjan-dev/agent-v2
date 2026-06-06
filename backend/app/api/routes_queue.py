@@ -15,7 +15,11 @@ from backend.app.queue.jobs import (
     runtime_queue,
     serialize_job,
 )
-from backend.app.queue.worker_heartbeats import serialize_worker_heartbeat, worker_heartbeat_service
+from backend.app.queue.worker_heartbeats import (
+    serialize_worker_heartbeat,
+    worker_heartbeat_service,
+    worker_is_stale,
+)
 
 router = APIRouter(prefix="/queue", tags=["queue"])
 workers_router = APIRouter(tags=["queue"])
@@ -103,6 +107,26 @@ async def _get_workers_payload(db: AsyncSession) -> dict:
     return {"workers": [serialize_worker_heartbeat(row) for row in rows]}
 
 
+async def _get_worker_stats_payload(db: AsyncSession) -> dict:
+    rows = await worker_heartbeat_service.list_workers(db)
+    stale = sum(1 for row in rows if worker_is_stale(row))
+    active = [row for row in rows if not worker_is_stale(row)]
+    return {
+        "stats": {
+            "total": len(rows),
+            "active": len(active),
+            "stale": stale,
+            "healthy": sum(1 for row in active if row.status == "healthy"),
+            "busy": sum(1 for row in active if row.current_queue_job_id is not None),
+            "stopped": sum(1 for row in rows if row.stopped_at is not None or row.status == "stopped"),
+            "failed": sum(1 for row in rows if row.status == "failed"),
+            "claimed_jobs_count": sum(row.claimed_jobs_count for row in rows),
+            "completed_jobs_count": sum(row.completed_jobs_count for row in rows),
+            "failed_jobs_count": sum(row.failed_jobs_count for row in rows),
+        }
+    }
+
+
 @router.get("/workers")
 async def get_queue_workers(db: AsyncSession = Depends(get_session)) -> dict:
     return await _get_workers_payload(db)
@@ -111,3 +135,8 @@ async def get_queue_workers(db: AsyncSession = Depends(get_session)) -> dict:
 @workers_router.get("/workers")
 async def get_workers(db: AsyncSession = Depends(get_session)) -> dict:
     return await _get_workers_payload(db)
+
+
+@workers_router.get("/workers/stats")
+async def get_workers_stats(db: AsyncSession = Depends(get_session)) -> dict:
+    return await _get_worker_stats_payload(db)

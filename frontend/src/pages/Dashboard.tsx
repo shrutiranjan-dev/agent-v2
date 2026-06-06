@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
+  Artifact,
   CodeDiagnostic,
   CodeSymbol,
   HumanInputRequest,
@@ -90,6 +91,10 @@ export function Dashboard() {
   const humanInputs = usePolling(() => api.humanInputRequests(selectedSessionId, "pending"), 4000);
   const models = usePolling(api.models, 15000);
   const artifacts = usePolling(api.artifacts, 15000);
+  const sessionArtifacts = usePolling(
+    () => selectedSessionId ? api.sessionArtifacts(selectedSessionId) : Promise.resolve({ artifacts: [] }),
+    15000
+  );
   const events = usePolling(api.events, 5000);
   const queueStats = usePolling(api.queueStats, 5000);
   const queueJobs = usePolling(api.queueJobs, 5000);
@@ -155,6 +160,7 @@ export function Dashboard() {
         void api.session(selectedSessionId).then(setSessionDetail);
         void permissions.refresh();
         void humanInputs.refresh();
+        void sessionArtifacts.refresh();
       },
       onError: (error) => setChatError(error.message)
     });
@@ -332,6 +338,7 @@ export function Dashboard() {
     }
     await permissions.refresh();
     await humanInputs.refresh();
+    await sessionArtifacts.refresh();
     await sessions.refresh();
     if (status === "failed") setChatPending(false);
   }
@@ -626,6 +633,23 @@ export function Dashboard() {
                       <p>{summary.content}</p>
                     </article>
                   ))}
+                </section>
+              )}
+              {(sessionArtifacts.data?.artifacts ?? []).length > 0 && (
+                <section className="summary-stack">
+                  <div className="summary-stack-head">
+                    <Box size={16} />
+                    <h3>Session artifacts</h3>
+                  </div>
+                  <div className="code-list">
+                    {(sessionArtifacts.data?.artifacts ?? []).map((artifact: Artifact) => (
+                      <article key={artifact.id}>
+                        <strong>{artifact.name}</strong>
+                        <span>{artifact.kind} / {artifact.content_type ?? "unknown"} / {formatBytes(artifact.size_bytes)}</span>
+                        <span>{artifact.download_status === "metadata_only" ? "Download metadata only" : artifact.download_url ?? "Download unavailable"}</span>
+                      </article>
+                    ))}
+                  </div>
                 </section>
               )}
               <MessageList messages={sessionDetail?.messages ?? []} />
@@ -971,11 +995,11 @@ export function Dashboard() {
         )}
 
         {active === "artifacts" && (
-          <Grid items={(artifacts.data?.artifacts ?? []).map((artifact) => ({
+          <Grid items={(artifacts.data?.artifacts ?? []).map((artifact: Artifact) => ({
             title: String(artifact.name),
-            subtitle: String(artifact.kind),
-            body: String(artifact.object_key),
-            meta: [String(artifact.content_type ?? ""), String(artifact.size_bytes ?? "")]
+            subtitle: `${artifact.kind} / ${artifact.download_status}`,
+            body: artifact.session_id ? `session ${artifact.session_id}` : "No session link recorded",
+            meta: [String(artifact.content_type ?? "unknown"), formatBytes(artifact.size_bytes)]
           }))} />
         )}
 
@@ -1052,4 +1076,11 @@ function formatAge(seconds?: number | null) {
   if (seconds < 60) return `${Math.round(seconds)}s`;
   if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
   return `${Math.round(seconds / 3600)}h`;
+}
+
+function formatBytes(bytes?: number | null) {
+  if (bytes == null) return "unknown size";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }

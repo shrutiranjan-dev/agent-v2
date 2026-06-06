@@ -121,6 +121,11 @@ def test_queue_routes_expose_jobs_stats_and_workers() -> None:
         assert workers_alias_response.status_code == 200
         assert workers_alias_response.json()["workers"][0]["worker_id"] == "worker-a"
 
+        worker_stats_response = client.get("/workers/stats")
+        assert worker_stats_response.status_code == 200
+        assert worker_stats_response.json()["stats"]["total"] == 1
+        assert worker_stats_response.json()["stats"]["completed_jobs_count"] == 2
+
         retry_response = client.post(f"/queue/jobs/{job.id}/retry", json={"reason": "operator_retry"})
         assert retry_response.status_code == 200
         assert retry_response.json()["job"]["status"] == JobStatus.QUEUED

@@ -332,6 +332,21 @@ export type QueueWorker = {
   updated_at: string;
 };
 
+export type Artifact = {
+  id: string;
+  name: string;
+  kind: string;
+  session_id?: string | null;
+  tool_call_id?: string | null;
+  content_type?: string | null;
+  size_bytes?: number | null;
+  checksum?: string | null;
+  metadata: Record<string, unknown>;
+  download_url?: string | null;
+  download_status: string;
+  created_at: string;
+};
+
 export type SessionDetail = {
   session: Session;
   messages: Message[];
@@ -428,7 +443,9 @@ export const api = {
     request<PermissionReplyResponse>(`/permissions/${id}/approve`, { method: "POST", body: JSON.stringify({}) }),
   deny: (id: string) =>
     request<PermissionReplyResponse>(`/permissions/${id}/deny`, { method: "POST", body: JSON.stringify({}) }),
-  artifacts: () => request<{ artifacts: Array<Record<string, unknown>> }>("/artifacts"),
+  artifacts: () => request<{ artifacts: Artifact[] }>("/artifacts"),
+  artifact: (id: string) => request<{ artifact: Artifact }>(`/artifacts/${id}`),
+  sessionArtifacts: (id: string) => request<{ artifacts: Artifact[] }>(`/sessions/${id}/artifacts`),
   events: () => request<{ events: SystemEvent[] }>("/system/events"),
   queueStats: () => request<{ stats: QueueStats; queue_enabled: boolean }>("/queue/stats"),
   queueJobs: () => request<{ jobs: QueueJob[] }>("/queue/jobs?limit=50"),
