@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -77,11 +78,41 @@ class PluginService:
         try:
             manifest = load_manifest(path)
         except Exception as exc:
+            # On a failed load, derive a stable, path-independent fallback
+            # name from the resolved path. Using the raw input path can
+            # produce unstable names across platforms (PosixPath sees a
+            # Windows path like "C:\..." as a single component, giving a
+            # different stem than on Windows) and the same name across
+            # retries of the same path (which collides on the unique
+            # (organization_id, name) constraint). Use the resolved path
+            # and a short content hash so retries of the same manifest
+            # path reuse the same failed-plugin row.
+            resolved_str = str(path.resolve())
+            digest = hashlib.sha256(resolved_str.encode("utf-8")).hexdigest()[:12]
+            stem_source = path.name or "invalid-plugin"
+            fallback_name = f"invalid-{stem_source}-{digest}"
+            existing = await self._get_by_name(db, payload.organization_id, fallback_name)
+            if existing is not None:
+                existing.manifest_path = str(path)
+                existing.last_error = str(exc)
+                existing.status = "failed"
+                existing.last_loaded_at = None
+                await db.flush()
+                await event_bus.publish(
+                    db,
+                    organization_id=payload.organization_id,
+                    project_id=payload.project_id,
+                    workspace_id=payload.workspace_id,
+                    event_type=EventType.PLUGIN_FAILED,
+                    severity="warning",
+                    payload={"manifest_path": str(path), "error": str(exc)},
+                )
+                return existing
             plugin = Plugin(
                 organization_id=payload.organization_id,
                 project_id=payload.project_id,
                 workspace_id=payload.workspace_id,
-                name=Path(payload.manifest_path).stem or "invalid-plugin",
+                name=fallback_name,
                 manifest_path=str(path),
                 source_type="local",
                 status="failed",

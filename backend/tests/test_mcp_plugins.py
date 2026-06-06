@@ -153,6 +153,53 @@ async def test_plugin_tool_requires_explicit_enabled_trusted_parent(tmp_path) ->
     assert result.output["text"] == "hello"
 
 
+async def test_plugin_failed_load_uses_stable_name_and_is_idempotent(tmp_path) -> None:
+    """A failed manifest load (missing file, bad JSON) must:
+
+    * Persist a row with status='failed' and a stable, path-independent name
+      (a hash of the resolved path) so retries with the same path don't
+      collide on the (organization_id, name) unique constraint.
+    * Be idempotent: a second load of the same missing path returns the
+      same plugin id and updates the recorded last_error.
+    """
+    missing_manifest = tmp_path / "definitely-missing.json"
+    db = FakeAsyncSession()
+    org_id = uuid4()
+
+    first = await plugin_service.load(
+        db,
+        PluginLoadRequest(
+            manifest_path=str(missing_manifest),
+            organization_id=org_id,
+            project_id=uuid4(),
+            workspace_id=uuid4(),
+            trusted=False,
+        ),
+    )
+    assert first.status == "failed"
+    assert first.name.startswith("invalid-")
+    assert first.id is not None
+    # The fallback name must not contain the raw input path (which on
+    # PosixPath is interpreted as a single component, leading to unique
+    # constraint violations across hosts and retries).
+    assert str(missing_manifest) not in first.name
+
+    second = await plugin_service.load(
+        db,
+        PluginLoadRequest(
+            manifest_path=str(missing_manifest),
+            organization_id=org_id,
+            project_id=uuid4(),
+            workspace_id=uuid4(),
+            trusted=False,
+        ),
+    )
+    assert second.id == first.id
+    assert second.name == first.name
+    assert second.status == "failed"
+    assert second.last_error is not None
+
+
 async def test_plugin_hook_called_before_and_after_tool_execute(monkeypatch, tmp_path) -> None:
     hook_registry.clear()
     calls: list[str] = []
