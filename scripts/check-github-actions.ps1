@@ -71,7 +71,7 @@ function Convert-WorkflowRuns {
             HeadSha    = [string]$run.head_sha
         }
     }
-    return $runs
+    return @($runs)
 }
 
 function Get-WorkflowRunsViaGh {
@@ -101,7 +101,7 @@ function Get-WorkflowRunsViaRest {
 
 function Select-LatestRequiredRuns {
     param(
-        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
         [object[]]$Runs,
         [Parameter(Mandatory = $true)]
         [string[]]$RequireWorkflows
@@ -159,7 +159,7 @@ while ((Get-Date) -lt $deadline) {
         Fail-Step "Unable to query GitHub Actions. Install 'gh' or allow GitHub REST API access. Error: $($_.Exception.Message)"
     }
 
-    $allRuns = Convert-WorkflowRuns -Payload $payload
+    $allRuns = @(Convert-WorkflowRuns -Payload $payload)
     $lastRequiredRuns = Select-LatestRequiredRuns -Runs $allRuns -RequireWorkflows $RequireWorkflows
 
     foreach ($run in $lastRequiredRuns) {
