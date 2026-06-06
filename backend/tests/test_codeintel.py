@@ -16,6 +16,8 @@ from backend.app.codeintel.language import detect_language
 from backend.app.codeintel.lsp_client import (
     encode_jsonrpc_message,
     lsp_client,
+    multi_lsp_client,
+    parse_lsp_command,
     read_jsonrpc_message,
 )
 from backend.app.codeintel.lsp_service import lsp_service
@@ -32,6 +34,7 @@ from backend.tests.fakes import FakeAsyncSession
 from backend.tests.test_agent_runner_runtime import make_session, make_user_message
 
 FAKE_LSP_SERVER = Path(__file__).parent / "fixtures" / "fake_lsp_server.py"
+FAKE_TS_LSP_SERVER = Path(__file__).parent / "fixtures" / "fake_ts_lsp_server.py"
 
 
 def codeintel_test_settings(
@@ -39,6 +42,8 @@ def codeintel_test_settings(
     *,
     lsp_enabled: bool = False,
     lsp_command: str | None = None,
+    ts_enabled: bool = False,
+    ts_command: str = "typescript-language-server --stdio",
     startup_timeout: int = 1,
     request_timeout: int = 1,
 ) -> SimpleNamespace:
@@ -64,6 +69,13 @@ def codeintel_test_settings(
             shutdown_timeout_seconds=1,
             max_response_chars=200_000,
             workspace_root=workspace_root,
+            ts_enabled=ts_enabled,
+            ts_command=ts_command,
+            ts_startup_timeout_seconds=startup_timeout,
+            ts_request_timeout_seconds=request_timeout,
+            ts_shutdown_timeout_seconds=1,
+            ts_max_response_chars=200_000,
+            ts_workspace_root=None,
         ),
     )
 
@@ -98,7 +110,7 @@ def code_file(path: str = "app.py", *, workspace_id=None) -> CodeFile:
 
 def test_language_detection() -> None:
     assert detect_language("backend/app/main.py") == "python"
-    assert detect_language("frontend/src/App.tsx") == "typescript"
+    assert detect_language("frontend/src/App.tsx") == "typescriptreact"
     assert detect_language("README.md") == "markdown"
     assert detect_language("archive.bin") is None
 
@@ -729,3 +741,271 @@ async def test_codeintel_routes_include_source_field(monkeypatch, tmp_path) -> N
     assert "lsp" in body
     assert "started" in body["lsp"]
     assert "started_at" in body["lsp"]
+
+
+async def test_ts_lsp_disabled_returns_static_fallback(monkeypatch, tmp_path) -> None:
+    """TS LSP disabled -> static fallback with correct language/lsp_server fields."""
+    source = tmp_path / "app.ts"
+    source.write_text("function greet() { return 'hello'; }\nclass Greeter {}\n", encoding="utf-8")
+    settings = codeintel_test_settings(tmp_path, lsp_enabled=False, ts_enabled=False)
+    patch_codeintel_settings(monkeypatch, settings)
+
+    result = await lsp_service.document_symbols(
+        FakeAsyncSession(),
+        workspace_id=uuid4(),
+        file_path="app.ts",
+        limit=20,
+    )
+
+    assert result.source == "static_fallback"
+    assert result.lsp_status == "static_fallback"
+    assert result.fallback_reason is not None
+    assert "lsp_disabled" in str(result.fallback_reason)
+    assert result.language == "typescript"
+    assert result.lsp_language == "typescript"
+    assert result.lsp_server == "none"
+
+
+async def test_ts_lsp_fake_server_symbols(monkeypatch, tmp_path) -> None:
+    """Fake TS LSP server returns greet and Greeter symbols with real_lsp source."""
+    source = tmp_path / "app.ts"
+    source.write_text(
+        "function greet() {\n  return 'hello';\n}\n\nclass Greeter {\n  greet() { return 'hi'; }\n}\n",
+        encoding="utf-8",
+    )
+    settings = codeintel_test_settings(tmp_path, lsp_enabled=False, ts_enabled=True)
+    settings.lsp.ts_command = [sys.executable, str(FAKE_TS_LSP_SERVER)]
+    patch_codeintel_settings(monkeypatch, settings)
+    monkeypatch.setattr("backend.app.codeintel.lsp_client.get_settings", lambda: settings)
+    monkeypatch.setattr("backend.app.codeintel.lsp_service.get_settings", lambda: settings)
+
+    result = await lsp_service.document_symbols(
+        FakeAsyncSession(),
+        workspace_id=uuid4(),
+        file_path="app.ts",
+        limit=20,
+    )
+    await lsp_service.shutdown()
+
+    symbol_names = {s["name"] for s in result.items}
+    assert "greet" in symbol_names
+    assert "Greeter" in symbol_names
+    assert result.source == "real_lsp"
+    assert result.language == "typescript"
+    assert result.lsp_server == "typescript"
+
+
+async def test_ts_lsp_fake_server_definition(monkeypatch, tmp_path) -> None:
+    """Fake TS LSP server returns definition with real_lsp source."""
+    source = tmp_path / "app.ts"
+    source.write_text(
+        "function greet() {\n  return 'hello';\n}\n\nclass Greeter {}\n",
+        encoding="utf-8",
+    )
+    settings = codeintel_test_settings(tmp_path, lsp_enabled=False, ts_enabled=True, startup_timeout=5, request_timeout=5)
+    settings.lsp.ts_command = [sys.executable, str(FAKE_TS_LSP_SERVER)]
+    patch_codeintel_settings(monkeypatch, settings)
+    monkeypatch.setattr("backend.app.codeintel.lsp_client.get_settings", lambda: settings)
+    monkeypatch.setattr("backend.app.codeintel.lsp_service.get_settings", lambda: settings)
+
+    definition = await lsp_service.goto_definition(
+        FakeAsyncSession(),
+        workspace_id=uuid4(),
+        file="app.ts",
+        line=1,
+        column=9,
+    )
+    await lsp_service.shutdown()
+
+    assert definition.source == "real_lsp"
+    assert definition.lsp_server == "typescript"
+    assert definition.language == "typescript"
+    assert definition.lsp_language == "typescript"
+    assert definition.items is not None
+    assert definition.items["file_path"] == "app.ts"
+
+
+async def test_ts_lsp_fake_server_references(monkeypatch, tmp_path) -> None:
+    """Fake TS LSP server returns references with real_lsp source."""
+    source = tmp_path / "app.ts"
+    source.write_text(
+        "function greet() {}\ngreet();\nclass Greeter {\n  greet() {}\n}\n",
+        encoding="utf-8",
+    )
+    settings = codeintel_test_settings(tmp_path, lsp_enabled=False, ts_enabled=True, startup_timeout=5, request_timeout=5)
+    settings.lsp.ts_command = [sys.executable, str(FAKE_TS_LSP_SERVER)]
+    patch_codeintel_settings(monkeypatch, settings)
+    monkeypatch.setattr("backend.app.codeintel.lsp_client.get_settings", lambda: settings)
+    monkeypatch.setattr("backend.app.codeintel.lsp_service.get_settings", lambda: settings)
+
+    references = await lsp_service.find_references(
+        FakeAsyncSession(),
+        workspace_id=uuid4(),
+        file="app.ts",
+        line=1,
+        column=9,
+    )
+    await lsp_service.shutdown()
+
+    assert references.source == "real_lsp"
+    assert references.lsp_server == "typescript"
+    assert references.language == "typescript"
+    assert len(references.items) == 2
+    assert references.items[0]["file_path"] == "app.ts"
+
+
+async def test_ts_lsp_health_includes_both_python_and_ts(monkeypatch, tmp_path) -> None:
+    """Health endpoint includes both Python and TypeScript LSP status."""
+    settings = codeintel_test_settings(tmp_path, lsp_enabled=True, ts_enabled=False)
+    patch_codeintel_settings(monkeypatch, settings)
+
+    health = await lsp_service.health()
+
+    assert "lsp_servers" in health
+    assert "python" in health["lsp_servers"]
+    assert "typescript" in health["lsp_servers"]
+    ts_status = health["lsp_servers"]["typescript"]
+    assert ts_status is not None
+    assert ts_status.get("mode") == "static_fallback"
+    assert ts_status.get("enabled") is False
+
+
+async def test_ts_lsp_missing_command_falls_back(monkeypatch, tmp_path) -> None:
+    """Missing TS LSP command returns static fallback, not crash."""
+    source = tmp_path / "app.ts"
+    source.write_text("function greet() {}\n", encoding="utf-8")
+    settings = codeintel_test_settings(
+        tmp_path,
+        lsp_enabled=False,
+        ts_enabled=True,
+        ts_command="definitely-not-installed-tsls",
+    )
+    patch_codeintel_settings(monkeypatch, settings)
+    monkeypatch.setattr("backend.app.codeintel.lsp_client.get_settings", lambda: settings)
+    monkeypatch.setattr("backend.app.codeintel.lsp_service.get_settings", lambda: settings)
+
+    result = await lsp_service.document_symbols(
+        FakeAsyncSession(),
+        workspace_id=uuid4(),
+        file_path="app.ts",
+        limit=20,
+    )
+
+    assert result.source == "static_fallback"
+    assert result.language == "typescript"
+    assert result.lsp_server == "none"
+    assert result.fallback_reason is not None
+
+
+async def test_ts_lsp_workspace_root_safety(monkeypatch, tmp_path) -> None:
+    """TS file outside workspace root is blocked."""
+    settings = codeintel_test_settings(tmp_path, lsp_enabled=False, ts_enabled=True)
+    settings.lsp.ts_command = sys.executable
+    patch_codeintel_settings(monkeypatch, settings)
+    monkeypatch.setattr("backend.app.codeintel.lsp_client.get_settings", lambda: settings)
+
+    ts_client = multi_lsp_client.get_client("typescript")
+    try:
+        await ts_client.initialize(tmp_path.parent)
+    except PermissionError as exc:
+        assert "outside configured root" in str(exc)
+    else:
+        raise AssertionError("expected workspace root guard for TS client")
+
+
+async def test_ts_lsp_route_includes_language_metadata(monkeypatch, tmp_path) -> None:
+    """TS route response includes language/lsp_server/typescript metadata."""
+    source = tmp_path / "app.ts"
+    source.write_text("function greet() {};\n", encoding="utf-8")
+    settings = codeintel_test_settings(tmp_path, lsp_enabled=False, ts_enabled=True)
+    settings.lsp.ts_command = [sys.executable, str(FAKE_TS_LSP_SERVER)]
+    patch_codeintel_settings(monkeypatch, settings)
+    monkeypatch.setattr("backend.app.codeintel.lsp_client.get_settings", lambda: settings)
+    monkeypatch.setattr("backend.app.codeintel.lsp_service.get_settings", lambda: settings)
+
+    result = await lsp_service.document_symbols(
+        FakeAsyncSession(),
+        workspace_id=uuid4(),
+        file_path="app.ts",
+        limit=20,
+    )
+    await lsp_service.shutdown()
+
+    assert result.source == "real_lsp"
+    assert result.lsp_server == "typescript"
+    assert result.language == "typescript"
+    assert result.lsp_language == "typescript"
+
+
+async def test_ts_lsp_tool_includes_language_metadata(monkeypatch, tmp_path) -> None:
+    """TS tool response includes language/lsp_server metadata."""
+    source = tmp_path / "app.tsx"
+    source.write_text("function Greet() { return <div>hello</div>; }\n", encoding="utf-8")
+    settings = codeintel_test_settings(tmp_path, lsp_enabled=False, ts_enabled=True, startup_timeout=5, request_timeout=5)
+    settings.lsp.ts_command = [sys.executable, str(FAKE_TS_LSP_SERVER)]
+    patch_codeintel_settings(monkeypatch, settings)
+    monkeypatch.setattr("backend.app.codeintel.lsp_client.get_settings", lambda: settings)
+    monkeypatch.setattr("backend.app.codeintel.lsp_service.get_settings", lambda: settings)
+
+    session = make_session()
+    db = FakeAsyncSession()
+    ctx = SimpleNamespace(
+        db=db,
+        workspace_id=session.workspace_id,
+        organization_id=session.organization_id,
+        project_id=session.project_id,
+        session_id=session.id,
+        agent_run_id=None,
+        tool_call_id=None,
+        agent_id="explore",
+        workspace_root=tmp_path,
+    )
+
+    symbols = await CodeSymbolsTool().run(
+        CodeSymbolsTool.input_model(file="app.tsx", limit=10), ctx  # type: ignore[arg-type]
+    )
+    await lsp_service.shutdown()
+
+    output = symbols.output
+    assert output["source"] == "real_lsp"
+    assert output["language"] == "typescriptreact"
+    assert output["lsp_server"] == "typescriptreact"
+    assert output["lsp_language"] == "typescriptreact"
+
+
+async def test_ts_lsp_command_parsing() -> None:
+    """typescript-language-server --stdio parses correctly."""
+    parts = parse_lsp_command("typescript-language-server --stdio")
+    assert parts == ["typescript-language-server", "--stdio"]
+
+
+async def test_ts_lsp_diagnostics_via_fake_server(monkeypatch, tmp_path) -> None:
+    """Fake TS LSP server returns diagnostics with real_lsp source."""
+    source = tmp_path / "app.ts"
+    source.write_text("function greet() {};\n", encoding="utf-8")
+    settings = codeintel_test_settings(tmp_path, lsp_enabled=False, ts_enabled=True)
+    settings.lsp.ts_command = [sys.executable, str(FAKE_TS_LSP_SERVER)]
+    patch_codeintel_settings(monkeypatch, settings)
+    monkeypatch.setattr("backend.app.codeintel.lsp_client.get_settings", lambda: settings)
+    monkeypatch.setattr("backend.app.codeintel.lsp_service.get_settings", lambda: settings)
+
+    _sym = await lsp_service.document_symbols(
+        FakeAsyncSession(),
+        workspace_id=uuid4(),
+        file_path="app.ts",
+        limit=20,
+    )
+
+    result = await lsp_service.get_diagnostics(
+        FakeAsyncSession(),
+        workspace_id=uuid4(),
+        file_path="app.ts",
+    )
+    await lsp_service.shutdown()
+
+    assert result.source == "real_lsp"
+    assert result.lsp_server == "typescript"
+    assert result.language == "typescript"
+    assert len(result.items) == 1
+    assert result.items[0]["severity"] == "warning"
+    assert "typescript" in str(result.items[0]["message"]).lower()

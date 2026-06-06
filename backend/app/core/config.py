@@ -72,6 +72,13 @@ class LspConfig(BaseModel):
     shutdown_timeout_seconds: int = Field(default=5, ge=1)
     max_response_chars: int = Field(default=200_000, ge=1000)
     workspace_root: Path = Path("/workspace")
+    ts_enabled: bool = False
+    ts_command: str = "typescript-language-server --stdio"
+    ts_startup_timeout_seconds: int = Field(default=10, ge=1)
+    ts_request_timeout_seconds: int = Field(default=10, ge=1)
+    ts_shutdown_timeout_seconds: int = Field(default=5, ge=1)
+    ts_max_response_chars: int = Field(default=200_000, ge=1000)
+    ts_workspace_root: Path | None = None
 
 
 class McpConfig(BaseModel):
@@ -284,6 +291,34 @@ class Settings(BaseSettings):
     )
     lsp_workspace_root_override: Path | None = Field(
         default=None, validation_alias=AliasChoices("AP_LSP_WORKSPACE_ROOT", "LSP_WORKSPACE_ROOT")
+    )
+    lsp_ts_enabled_override: bool | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AP_TS_LSP_ENABLED", "TS_LSP_ENABLED"),
+    )
+    lsp_ts_command_override: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AP_TS_LSP_COMMAND", "TS_LSP_COMMAND"),
+    )
+    lsp_ts_startup_timeout_seconds_override: int | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AP_TS_LSP_STARTUP_TIMEOUT_SECONDS", "TS_LSP_STARTUP_TIMEOUT_SECONDS"),
+    )
+    lsp_ts_request_timeout_seconds_override: int | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AP_TS_LSP_REQUEST_TIMEOUT_SECONDS", "TS_LSP_REQUEST_TIMEOUT_SECONDS"),
+    )
+    lsp_ts_shutdown_timeout_seconds_override: int | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AP_TS_LSP_SHUTDOWN_TIMEOUT_SECONDS", "TS_LSP_SHUTDOWN_TIMEOUT_SECONDS"),
+    )
+    lsp_ts_max_response_chars_override: int | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AP_TS_LSP_MAX_RESPONSE_CHARS", "TS_LSP_MAX_RESPONSE_CHARS"),
+    )
+    lsp_ts_workspace_root_override: Path | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AP_TS_LSP_WORKSPACE_ROOT", "TS_LSP_WORKSPACE_ROOT"),
     )
     codeintel_max_file_bytes_override: int | None = Field(
         default=None, validation_alias=AliasChoices("AP_CODEINTEL_MAX_FILE_BYTES", "CODEINTEL_MAX_FILE_BYTES")
@@ -518,6 +553,20 @@ class Settings(BaseSettings):
             self.lsp.max_response_chars = self.lsp_max_response_chars_override
         if self.lsp_workspace_root_override is not None:
             self.lsp.workspace_root = self.lsp_workspace_root_override
+        if self.lsp_ts_enabled_override is not None:
+            self.lsp.ts_enabled = self.lsp_ts_enabled_override
+        if self.lsp_ts_command_override:
+            self.lsp.ts_command = self.lsp_ts_command_override
+        if self.lsp_ts_startup_timeout_seconds_override is not None:
+            self.lsp.ts_startup_timeout_seconds = self.lsp_ts_startup_timeout_seconds_override
+        if self.lsp_ts_request_timeout_seconds_override is not None:
+            self.lsp.ts_request_timeout_seconds = self.lsp_ts_request_timeout_seconds_override
+        if self.lsp_ts_shutdown_timeout_seconds_override is not None:
+            self.lsp.ts_shutdown_timeout_seconds = self.lsp_ts_shutdown_timeout_seconds_override
+        if self.lsp_ts_max_response_chars_override is not None:
+            self.lsp.ts_max_response_chars = self.lsp_ts_max_response_chars_override
+        if self.lsp_ts_workspace_root_override is not None:
+            self.lsp.ts_workspace_root = self.lsp_ts_workspace_root_override
         if self.codeintel_max_file_bytes_override is not None:
             self.codeintel.max_file_bytes = self.codeintel_max_file_bytes_override
         if self.codeintel_max_files_override is not None:

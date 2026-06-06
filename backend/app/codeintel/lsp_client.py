@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
 
-from backend.app.codeintel.language import detect_language
+from backend.app.codeintel.language import detect_language, lsp_language_id
 from backend.app.core.config import get_settings
 from backend.app.core.redaction import redact_text
 from backend.app.tools.base import is_inside
@@ -56,7 +56,8 @@ async def read_jsonrpc_message(reader: asyncio.StreamReader) -> dict[str, Any]:
 
 
 class LspClient:
-    def __init__(self) -> None:
+    def __init__(self, language: str = "python") -> None:
+        self._language = language
         self._process: asyncio.subprocess.Process | None = None
         self._stdout: asyncio.StreamReader | None = None
         self._stderr_task: asyncio.Task[None] | None = None
@@ -73,13 +74,28 @@ class LspClient:
         self._spawn_argv: list[str] = []
         self._spawn_debug: dict[str, Any] = {}
 
+    @property
+    def language(self) -> str:
+        return self._language
+
+    def _get_settings_attr(self, attr: str) -> Any:
+        settings = get_settings()
+        if self._language == "python":
+            mapped = "python_command" if attr == "command" else attr
+            return getattr(settings.lsp, mapped)
+        elif self._language in ("typescript", "typescriptreact", "javascript", "javascriptreact"):
+            ts_attr = f"ts_{attr}"
+            if hasattr(settings.lsp, ts_attr):
+                return getattr(settings.lsp, ts_attr)
+        return getattr(settings.lsp, attr)
+
     async def health(self, workspace_root: Path) -> dict[str, Any]:
         try:
             await self.initialize(workspace_root)
         except Exception as exc:
             return {
                 "status": "failed",
-                "command": self._command or get_settings().lsp.python_command,
+                "command": self._command or self._get_settings_attr("command"),
                 "last_error": redact_text(str(exc)),
                 "running": False,
                 "debug": self.debug_snapshot(error=exc),
@@ -154,7 +170,6 @@ class LspClient:
         return await self._request(method, params)
 
     async def _request(self, method: str, params: dict[str, Any]) -> Any:
-        settings = get_settings()
         async with self._lock:
             if not self._is_running():
                 if self._workspace_root is None:
@@ -173,21 +188,21 @@ class LspClient:
             try:
                 response = await asyncio.wait_for(
                     self._read_response_locked(request_id),
-                    timeout=settings.lsp.request_timeout_seconds,
+                    timeout=self._get_settings_attr("request_timeout_seconds"),
                 )
             except TimeoutError as exc:
-                raise TimeoutError(f"LSP request timed out after {settings.lsp.request_timeout_seconds}s: {method}") from exc
+                raise TimeoutError(f"LSP request timed out after {self._get_settings_attr('request_timeout_seconds')}s: {method}") from exc
             if "error" in response:
                 raise RuntimeError(redact_text(json.dumps(response["error"], default=str)))
             result = response.get("result")
             serialized = json.dumps(result, default=str)
-            if len(serialized) > settings.lsp.max_response_chars:
-                raise RuntimeError(f"LSP response exceeded {settings.lsp.max_response_chars} characters.")
+            if len(serialized) > self._get_settings_attr("max_response_chars"):
+                raise RuntimeError(f"LSP response exceeded {self._get_settings_attr('max_response_chars')} characters.")
             return result
 
     async def _restart_locked(self, workspace_root: Path) -> None:
         await self._shutdown_locked()
-        self._configured_command = get_settings().lsp.python_command
+        self._configured_command = self._get_settings_attr("command")
         try:
             command_info = self._resolve_command(self._configured_command)
         except Exception as exc:
@@ -265,12 +280,12 @@ class LspClient:
         try:
             result = await asyncio.wait_for(
                 self._initialize_protocol_locked(initialize_params),
-                timeout=get_settings().lsp.startup_timeout_seconds,
+                timeout=self._get_settings_attr("startup_timeout_seconds"),
             )
         except TimeoutError as exc:
             await self._terminate_locked()
             raise TimeoutError(
-                f"LSP startup timed out after {get_settings().lsp.startup_timeout_seconds}s for {self._command}"
+                f"LSP startup timed out after {self._get_settings_attr('startup_timeout_seconds')}s for {self._command}"
             ) from exc
         self._capabilities = result.get("capabilities", {}) if isinstance(result, dict) else {}
 
@@ -301,7 +316,7 @@ class LspClient:
                 await self._write_locked({"jsonrpc": "2.0", "id": request_id, "method": "shutdown", "params": {}})
                 await asyncio.wait_for(
                     self._read_response_locked(request_id),
-                    timeout=get_settings().lsp.shutdown_timeout_seconds,
+                    timeout=self._get_settings_attr("shutdown_timeout_seconds"),
                 )
                 await self._write_locked({"jsonrpc": "2.0", "method": "exit", "params": {}})
         except Exception:
@@ -353,13 +368,13 @@ class LspClient:
 
     async def _ensure_document_open(self, path: Path) -> None:
         path = self._validate_document_path(path)
-        workspace_root = self._workspace_root or get_settings().lsp.workspace_root
+        workspace_root = self._workspace_root or self._get_workspace_root()
         await self.initialize(workspace_root)
         uri = path.resolve().as_uri()
         async with self._lock:
             if uri in self._opened_documents:
                 return
-            language_id = detect_language(path.name) or "plaintext"
+            language_id = lsp_language_id(detect_language(path.name) or "plaintext")
             text = path.read_text(encoding="utf-8", errors="replace")
             await self._write_locked(
                 {
@@ -378,13 +393,25 @@ class LspClient:
             self._opened_documents.add(uri)
 
     def _validate_workspace_root(self, workspace_root: Path) -> None:
-        configured_root = get_settings().lsp.workspace_root.resolve()
+        if self._language in ("typescript", "typescriptreact", "javascript", "javascriptreact"):
+            ts_root = get_settings().lsp.ts_workspace_root
+            if ts_root:
+                configured_root = ts_root.resolve()
+            else:
+                configured_root = get_settings().lsp.workspace_root.resolve()
+        else:
+            configured_root = get_settings().lsp.workspace_root.resolve()
         resolved = workspace_root.resolve()
         if resolved != configured_root and not is_inside(configured_root, resolved):
             raise PermissionError(f"LSP workspace root is outside configured root: {resolved}")
 
     def _validate_document_path(self, path: Path) -> Path:
-        workspace_root = (self._workspace_root or get_settings().lsp.workspace_root).resolve()
+        if self._language in ("typescript", "typescriptreact", "javascript", "javascriptreact"):
+            ts_root = get_settings().lsp.ts_workspace_root
+            default_root = ts_root if ts_root else get_settings().lsp.workspace_root
+        else:
+            default_root = get_settings().lsp.workspace_root
+        workspace_root = (self._workspace_root or default_root).resolve()
         resolved = path.resolve() if path.is_absolute() else (workspace_root / path).resolve()
         if not is_inside(workspace_root, resolved):
             raise PermissionError(f"LSP document path is outside workspace root: {resolved}")
@@ -435,6 +462,16 @@ class LspClient:
             value = os.environ.get(key)
             if value:
                 env[key] = value
+        if self._language in ("typescript", "typescriptreact", "javascript", "javascriptreact"):
+            node_path = shutil.which("node")
+            npm_path = shutil.which("npm") or shutil.which("npm.cmd")
+            npx_path = shutil.which("npx") or shutil.which("npx.cmd")
+            if node_path:
+                env["NODE_PATH"] = str(Path(node_path).parent)
+            if npm_path:
+                env["NPM_PATH"] = str(Path(npm_path).parent)
+            if npx_path:
+                env["NPX_PATH"] = str(Path(npx_path).parent)
         env["PYTHONUNBUFFERED"] = "1"
         return env
 
@@ -456,11 +493,23 @@ class LspClient:
         return self._stderr_text or None
 
     def debug_snapshot(self, *, error: Exception | None = None) -> dict[str, Any]:
-        pylsp_spec = importlib.util.find_spec("pylsp")
+        if self._language == "python":
+            spec = importlib.util.find_spec("pylsp")
+            lang_import_check = {
+                "available": spec is not None,
+                "origin": getattr(spec, "origin", None),
+            }
+        else:
+            tsls_spec = importlib.util.find_spec("typescript_language_server")
+            lang_import_check = {
+                "available": tsls_spec is not None,
+                "origin": getattr(tsls_spec, "origin", None),
+            }
         snapshot = {
-            "configured_command": self._configured_command or get_settings().lsp.python_command,
+            "language": self._language,
+            "configured_command": self._configured_command or self._get_settings_attr("command"),
             "spawn_argv": list(self._spawn_argv),
-            "command": self._command or get_settings().lsp.python_command,
+            "command": self._command or self._get_settings_attr("command"),
             "executable": self._spawn_debug.get("executable"),
             "resolved_executable": self._spawn_debug.get("resolved_executable"),
             "command_exists": bool(self._spawn_debug.get("command_exists")),
@@ -468,16 +517,14 @@ class LspClient:
             "script_exists": self._spawn_debug.get("script_exists"),
             "cwd": self._spawn_debug.get("cwd"),
             "workspace_root": self._spawn_debug.get("workspace_root")
-            or str(get_settings().lsp.workspace_root.resolve()),
+            or str(self._get_workspace_root().resolve()),
             "path": self._spawn_debug.get("path") or os.environ.get("PATH"),
             "python_executable": shutil.which("python"),
             "python3_executable": shutil.which("python3"),
             "sys_executable": sys.executable,
             "platform": platform.platform(),
-            "pylsp_import_check": {
-                "available": pylsp_spec is not None,
-                "origin": getattr(pylsp_spec, "origin", None),
-            },
+            "language_server_import_check": lang_import_check,
+            "node_check": self._node_check() if self._language in ("typescript", "typescriptreact", "javascript", "javascriptreact") else None,
             "stderr_tail": self.last_error_details(),
             "running": self._is_running(),
         }
@@ -488,6 +535,36 @@ class LspClient:
             snapshot["last_error_type"] = self._spawn_debug.get("last_error_type")
             snapshot["last_error"] = self._spawn_debug.get("last_error")
         return snapshot
+
+    def _get_workspace_root(self) -> Path:
+        if self._language in ("typescript", "typescriptreact", "javascript", "javascriptreact"):
+            ts_root = get_settings().lsp.ts_workspace_root
+            if ts_root:
+                return ts_root
+        return get_settings().lsp.workspace_root
+
+    def _node_check(self) -> dict[str, Any] | None:
+        node_version = None
+        npm_version = None
+        tsls_version = None
+        try:
+            import subprocess
+            node_result = subprocess.run(["node", "--version"], capture_output=True, text=True, timeout=2)
+            if node_result.returncode == 0:
+                node_version = node_result.stdout.strip()
+            npm_result = subprocess.run(["npm", "--version"], capture_output=True, text=True, timeout=2)
+            if npm_result.returncode == 0:
+                npm_version = npm_result.stdout.strip()
+            tsls_result = subprocess.run(["typescript-language-server", "--version"], capture_output=True, text=True, timeout=2)
+            if tsls_result.returncode == 0:
+                tsls_version = tsls_version = tsls_result.stdout.strip()
+        except Exception:
+            pass
+        return {
+            "node_version": node_version,
+            "npm_version": npm_version,
+            "typescript_language_server_version": tsls_version,
+        }
 
     def _detect_script_path(self, parts: list[str]) -> tuple[str | None, bool | None]:
         if len(parts) < 2:
@@ -513,4 +590,38 @@ class LspClient:
             path = path[1:]
         return Path(path)
 
-lsp_client = LspClient()
+
+class MultiLanguageLspClient:
+    def __init__(self) -> None:
+        self._clients: dict[str, LspClient] = {
+            "python": LspClient("python"),
+            "typescript": LspClient("typescript"),
+            "typescriptreact": LspClient("typescriptreact"),
+            "javascript": LspClient("javascript"),
+            "javascriptreact": LspClient("javascriptreact"),
+        }
+
+    def get_client(self, language: str) -> LspClient:
+        return self._clients.get(language, self._clients["python"])
+
+    async def health(self, workspace_root: Path) -> dict[str, Any]:
+        return {
+            "python": await self._clients["python"].health(workspace_root),
+            "typescript": await self._clients["typescript"].health(workspace_root),
+        }
+
+    async def shutdown_all(self) -> dict[str, Any]:
+        results = {}
+        for lang, client in self._clients.items():
+            try:
+                results[lang] = await client.shutdown()
+            except Exception as exc:
+                results[lang] = {"error": str(exc)}
+        return results
+
+    def debug_snapshot_all(self) -> dict[str, Any]:
+        return {lang: client.debug_snapshot() for lang, client in self._clients.items()}
+
+
+multi_lsp_client = MultiLanguageLspClient()
+lsp_client = multi_lsp_client._clients["python"]

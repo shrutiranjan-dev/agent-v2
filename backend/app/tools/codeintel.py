@@ -129,6 +129,9 @@ class CodeSymbolsTool(CodeIntelTool):
             lsp_status = result.lsp_status
             fallback_reason = result.fallback_reason
             lsp_snapshot = result.lsp
+            language_val = result.language
+            lsp_language = result.lsp_language
+            lsp_server = result.lsp_server
         else:
             symbols = await codeintel_repository.find_symbols(
                 self._db(ctx),
@@ -143,6 +146,9 @@ class CodeSymbolsTool(CodeIntelTool):
             lsp_status = lsp_service.status().get("mode", "static_fallback")
             fallback_reason = "File-scoped LSP requires a file path; static index used."
             lsp_snapshot = lsp_service.status()
+            language_val = input_data.language
+            lsp_language = input_data.language
+            lsp_server = "none"
         return ToolResult(
             title=f"{len(symbols)} symbol(s)",
             output={
@@ -152,6 +158,9 @@ class CodeSymbolsTool(CodeIntelTool):
                 "lsp_status": lsp_status,
                 "fallback_reason": fallback_reason,
                 "lsp": lsp_snapshot,
+                "language": language_val,
+                "lsp_language": lsp_language,
+                "lsp_server": lsp_server,
             },
             metadata={
                 "count": len(symbols),
@@ -193,6 +202,9 @@ class CodeDefinitionTool(CodeIntelTool):
                 "lsp_status": result.lsp_status,
                 "fallback_reason": result.fallback_reason,
                 "lsp": result.lsp,
+                "language": result.language,
+                "lsp_language": result.lsp_language,
+                "lsp_server": result.lsp_server,
             },
             metadata={
                 "found": result.items is not None,
@@ -238,6 +250,9 @@ class CodeReferencesTool(CodeIntelTool):
                 "lsp_status": result.lsp_status,
                 "fallback_reason": result.fallback_reason,
                 "lsp": result.lsp,
+                "language": result.language,
+                "lsp_language": result.lsp_language,
+                "lsp_server": result.lsp_server,
             },
             metadata={
                 "count": len(references),
@@ -274,6 +289,9 @@ class CodeDiagnosticsTool(CodeIntelTool):
                 "lsp_status": result.lsp_status,
                 "fallback_reason": result.fallback_reason,
                 "lsp": result.lsp,
+                "language": result.language,
+                "lsp_language": result.lsp_language,
+                "lsp_server": result.lsp_server,
             },
             metadata={
                 "count": len(diagnostics),

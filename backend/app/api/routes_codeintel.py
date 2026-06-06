@@ -104,6 +104,9 @@ async def list_code_symbols(
             "lsp_status": result.lsp_status,
             "fallback_reason": result.fallback_reason,
             "lsp": result.lsp,
+            "language": result.language,
+            "lsp_language": result.lsp_language,
+            "lsp_server": result.lsp_server,
         }
     rows = await codeintel_repository.find_symbols(
         db,
@@ -120,6 +123,9 @@ async def list_code_symbols(
         "lsp_status": lsp_service.status().get("mode", "static_fallback"),
         "fallback_reason": "File-scoped LSP requires a file path; static index used.",
         "lsp": lsp_service.status(),
+        "language": language or "unknown",
+        "lsp_language": language or "unknown",
+        "lsp_server": "none",
     }
 
 
@@ -149,6 +155,9 @@ async def code_definition(
         "lsp_status": result.lsp_status,
         "fallback_reason": result.fallback_reason,
         "lsp": result.lsp,
+        "language": result.language,
+        "lsp_language": result.lsp_language,
+        "lsp_server": result.lsp_server,
     }
 
 
@@ -182,6 +191,9 @@ async def code_references(
         "lsp_status": result.lsp_status,
         "fallback_reason": result.fallback_reason,
         "lsp": result.lsp,
+        "language": result.language,
+        "lsp_language": result.lsp_language,
+        "lsp_server": result.lsp_server,
     }
 
 
@@ -207,6 +219,9 @@ async def code_diagnostics(
         "lsp_status": result.lsp_status,
         "fallback_reason": result.fallback_reason,
         "lsp": result.lsp,
+        "language": result.language,
+        "lsp_language": result.lsp_language,
+        "lsp_server": result.lsp_server,
     }
 
 
@@ -237,4 +252,5 @@ async def codeintel_health() -> dict[str, Any]:
         "indexing_enabled": settings.codeintel.enabled,
         "workspace_root": str(settings.workspace_root),
         "lsp": status,
+        "lsp_servers": status.get("lsp_servers", {}),
     }

@@ -10,13 +10,17 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.codeintel.lsp_client import lsp_client
+from backend.app.codeintel.language import detect_language, lsp_language_id
+from backend.app.codeintel.lsp_client import LspClient, multi_lsp_client
 from backend.app.codeintel.repository import codeintel_repository
 from backend.app.core.config import get_settings
 from backend.app.tools.base import is_inside
 
 SOURCE_REAL_LSP = "real_lsp"
 SOURCE_STATIC_FALLBACK = "static_fallback"
+
+TS_LANGUAGES = {"typescript", "typescriptreact", "javascript", "javascriptreact"}
+PYTHON_LANGUAGES = {"python"}
 
 
 @dataclass
@@ -38,68 +42,149 @@ class LspResult:
     lsp_status: str
     fallback_reason: str | None = None
     lsp: dict[str, Any] = field(default_factory=dict)
+    language: str | None = None
+    lsp_language: str | None = None
+    lsp_server: str = "none"
 
 
 class LspService:
     def __init__(self) -> None:
-        self._state = LspServiceState()
+        self._python_state = LspServiceState()
+        self._ts_state = LspServiceState()
+
+    def _state_for(self, language: str) -> LspServiceState:
+        if language in TS_LANGUAGES:
+            return self._ts_state
+        return self._python_state
+
+    def _client_for(self, language: str) -> LspClient:
+        return multi_lsp_client.get_client(language)
+
+    def _lsp_enabled_for(self, language: str) -> bool:
+        settings = get_settings()
+        if language in TS_LANGUAGES:
+            return getattr(settings.lsp, "ts_enabled", False)
+        return settings.lsp.enabled
 
     async def health(self) -> dict[str, Any]:
         settings = get_settings()
-        self._state.command = settings.lsp.python_command
-        if not settings.lsp.enabled:
-            self._state.real_lsp_enabled = False
-            self._state.mode = "static_fallback"
-            self._state.last_error = "Static database index fallback is active."
-            self._state.last_error_type = None
-            return self.status()
-        try:
-            await lsp_client.initialize(settings.lsp.workspace_root)
-        except Exception as exc:
-            self._state.real_lsp_enabled = False
-            self._state.mode = "failed"
-            self._state.last_error = f"{exc}. Static fallback remains available."
-            self._state.last_error_type = type(exc).__name__
-            return self.status()
-        self._state.real_lsp_enabled = True
-        self._state.mode = "real_lsp"
-        self._state.last_error = None
-        self._state.last_error_type = None
-        if self._state.started_at is None:
-            self._state.started_at = datetime.now(UTC)
-        return self.status()
+        py_health = await self._language_health("python")
+        ts_health = await self._language_health("typescript")
+        result = {
+            "status": "ok" if (py_health.get("real_lsp_enabled") or ts_health.get("ts", {}).get("real_lsp_enabled")) else "degraded",
+            "mode": py_health.get("mode", "static_fallback"),
+            "real_lsp_enabled": py_health.get("real_lsp_enabled", False),
+            "command": py_health.get("command", settings.lsp.python_command),
+            "last_error": py_health.get("last_error"),
+            "last_error_type": py_health.get("last_error_type"),
+            "started_at": py_health.get("started_at"),
+            "started": py_health.get("started_at"),
+            "request_count": py_health.get("request_count", 0),
+            "failure_count": py_health.get("failure_count", 0),
+            "reason": py_health.get("reason"),
+            "lsp_servers": {
+                "python": py_health,
+                "typescript": ts_health.get("ts"),
+            },
+        }
+        if "debug" in py_health:
+            result["debug"] = py_health["debug"]
+        return result
 
-    def status(self) -> dict[str, Any]:
-        started_iso = self._state.started_at.isoformat() if self._state.started_at else None
+    async def _language_health(self, language: str) -> dict[str, Any]:
+        settings = get_settings()
+        state = self._state_for(language)
+        client = self._client_for(language)
+        enabled = self._lsp_enabled_for(language)
+
+        if language == "python":
+            state.command = settings.lsp.python_command
+        else:
+            state.command = getattr(settings.lsp, "ts_command", "")
+
+        if not enabled:
+            state.real_lsp_enabled = False
+            state.mode = "static_fallback"
+            state.last_error = "Static database index fallback is active."
+            state.last_error_type = None
+            result = self._status_for(language)
+            if language != "python":
+                return {"ts": result}
+            return result
+
+        try:
+            ws_root = self._workspace_root_for(language)
+            await client.initialize(ws_root)
+        except Exception as exc:
+            state.real_lsp_enabled = False
+            state.mode = "failed"
+            state.last_error = f"{exc}. Static fallback remains available."
+            state.last_error_type = type(exc).__name__
+            result = self._status_for(language)
+            if language != "python":
+                return {"ts": result}
+            return result
+
+        state.real_lsp_enabled = True
+        state.mode = "real_lsp"
+        state.last_error = None
+        state.last_error_type = None
+        if state.started_at is None:
+            state.started_at = datetime.now(UTC)
+        result = self._status_for(language)
+        if language != "python":
+            return {"ts": result}
+        return result
+
+    def status(self, language: str = "python") -> dict[str, Any]:
+        return self._status_for(language)
+
+    def _status_for(self, language: str) -> dict[str, Any]:
+        state = self._state_for(language)
+        client = self._client_for(language)
+        started_iso = state.started_at.isoformat() if state.started_at else None
+        enabled = self._lsp_enabled_for(language)
+        settings = get_settings()
+        cmd = settings.lsp.python_command if language == "python" else getattr(settings.lsp, "ts_command", "")
+
         payload = {
-            "status": "ok" if self._state.real_lsp_enabled else "degraded",
-            "mode": self._state.mode,
-            "real_lsp_enabled": self._state.real_lsp_enabled,
-            "command": self._state.command or get_settings().lsp.python_command,
-            "last_error": self._state.last_error,
-            "last_error_type": self._state.last_error_type,
+            "status": "ok" if state.real_lsp_enabled else "degraded",
+            "mode": state.mode,
+            "real_lsp_enabled": state.real_lsp_enabled,
+            "command": state.command or cmd,
+            "last_error": state.last_error,
+            "last_error_type": state.last_error_type,
             "started_at": started_iso,
             "started": started_iso,
-            "request_count": self._state.request_count,
-            "failure_count": self._state.failure_count,
-            "reason": self._state.last_error,
+            "request_count": state.request_count,
+            "failure_count": state.failure_count,
+            "reason": state.last_error,
+            "lsp_server": language if state.real_lsp_enabled else "none",
+            "language": language,
+            "lsp_language": lsp_language_id(language),
+            "enabled": enabled,
         }
-        if self._include_debug_details():
-            payload["debug"] = lsp_client.debug_snapshot()
+        if self._include_debug_details(state):
+            payload["debug"] = client.debug_snapshot()
         return payload
 
     async def shutdown(self) -> dict[str, Any]:
-        result = await lsp_client.shutdown()
-        self._state.real_lsp_enabled = False
-        if get_settings().lsp.enabled:
-            self._state.mode = "failed"
-            self._state.last_error = "Real LSP client stopped. Static fallback remains available."
-            self._state.last_error_type = "RuntimeError"
-        else:
-            self._state.mode = "static_fallback"
-            self._state.last_error = "Static database index fallback is active."
-            self._state.last_error_type = None
-        return result
+        settings = get_settings()
+        for language in ("python", "typescript"):
+            state = self._state_for(language)
+            client = self._client_for(language)
+            await client.shutdown()
+            state.real_lsp_enabled = False
+            enabled = settings.lsp.enabled if language == "python" else getattr(settings.lsp, "ts_enabled", False)
+            if enabled:
+                state.mode = "failed"
+                state.last_error = "Real LSP client stopped. Static fallback remains available."
+                state.last_error_type = "RuntimeError"
+            else:
+                state.mode = "static_fallback"
+                state.last_error = "Static database index fallback is active."
+                state.last_error_type = None
+        return {"status": "stopped"}
 
     async def document_symbols(
         self,
@@ -112,20 +197,26 @@ class LspService:
         language: str | None = None,
         limit: int = 200,
     ) -> LspResult:
-        self._sync_disabled_state()
-        if self._should_use_real_lsp():
+        detected = language or (detect_language(file_path) or "python")
+        self._sync_disabled_state(detected)
+        if self._should_use_real_lsp(detected):
             try:
-                symbols = await self._document_symbols_real(file_path)
-                self._record_success()
+                client = self._client_for(detected)
+                raw_symbols = await client.document_symbols(self._resolve_document_path(file_path, detected))
+                symbols = self._normalize_document_symbols(raw_symbols, file_path=file_path)
+                self._record_success(detected)
                 return LspResult(
                     items=self._filter_symbols(symbols, query=query, kind=kind, language=language, limit=limit),
                     source=SOURCE_REAL_LSP,
-                    lsp_status=self._state.mode,
+                    lsp_status=self._state_for(detected).mode,
                     fallback_reason=None,
-                    lsp=self.status(),
+                    lsp=self._status_for(detected),
+                    language=detected,
+                    lsp_language=lsp_language_id(detected),
+                    lsp_server=detected,
                 )
             except Exception as exc:
-                self._record_failure(exc)
+                self._record_failure(detected, exc)
         items = await codeintel_repository.find_symbols(
             db,
             workspace_id=workspace_id,
@@ -135,12 +226,16 @@ class LspService:
             language=language,
             limit=limit,
         )
+        fallback_reason = self._fallback_reason(detected)
         return LspResult(
             items=items,
             source=SOURCE_STATIC_FALLBACK,
-            lsp_status=self._state.mode,
-            fallback_reason=self._state.last_error,
-            lsp=self.status(),
+            lsp_status=self._state_for(detected).mode,
+            fallback_reason=fallback_reason,
+            lsp=self._status_for(detected),
+            language=detected,
+            lsp_language=lsp_language_id(detected),
+            lsp_server="none",
         )
 
     async def goto_definition(
@@ -153,22 +248,27 @@ class LspService:
         line: int | None = None,
         column: int | None = None,
     ) -> LspResult:
-        self._sync_disabled_state()
-        if file and line is not None and self._should_use_real_lsp():
+        detected = detect_language(file or "") or "python"
+        self._sync_disabled_state(detected)
+        if file and line is not None and self._should_use_real_lsp(detected):
             try:
-                location = await lsp_client.goto_definition(self._resolve_document_path(file), line, column or 0)
-                self._record_success()
+                client = self._client_for(detected)
+                location = await client.goto_definition(self._resolve_document_path(file, detected), line, column or 0)
+                self._record_success(detected)
                 normalized = self._normalize_definition(location)
                 if normalized:
                     return LspResult(
                         items=normalized,
                         source=SOURCE_REAL_LSP,
-                        lsp_status=self._state.mode,
+                        lsp_status=self._state_for(detected).mode,
                         fallback_reason=None,
-                        lsp=self.status(),
+                        lsp=self._status_for(detected),
+                        language=detected,
+                        lsp_language=lsp_language_id(detected),
+                        lsp_server=detected,
                     )
             except Exception as exc:
-                self._record_failure(exc)
+                self._record_failure(detected, exc)
         items = await self._fallback_definition(
             db,
             workspace_id=workspace_id,
@@ -176,12 +276,16 @@ class LspService:
             file=file,
             line=line,
         )
+        fallback_reason = self._fallback_reason(detected)
         return LspResult(
             items=items,
             source=SOURCE_STATIC_FALLBACK,
-            lsp_status=self._state.mode,
-            fallback_reason=self._state.last_error,
-            lsp=self.status(),
+            lsp_status=self._state_for(detected).mode,
+            fallback_reason=fallback_reason,
+            lsp=self._status_for(detected),
+            language=detected,
+            lsp_language=lsp_language_id(detected),
+            lsp_server="none",
         )
 
     async def find_references(
@@ -196,22 +300,27 @@ class LspService:
         column: int | None = None,
         limit: int = 100,
     ) -> LspResult:
-        self._sync_disabled_state()
-        if file and line is not None and self._should_use_real_lsp():
+        detected = detect_language(file or "") or "python"
+        self._sync_disabled_state(detected)
+        if file and line is not None and self._should_use_real_lsp(detected):
             try:
-                locations = await lsp_client.find_references(self._resolve_document_path(file), line, column or 0)
-                self._record_success()
+                client = self._client_for(detected)
+                locations = await client.find_references(self._resolve_document_path(file, detected), line, column or 0)
+                self._record_success(detected)
                 normalized = self._normalize_references(locations)
                 if normalized:
                     return LspResult(
                         items=normalized[:limit],
                         source=SOURCE_REAL_LSP,
-                        lsp_status=self._state.mode,
+                        lsp_status=self._state_for(detected).mode,
                         fallback_reason=None,
-                        lsp=self.status(),
+                        lsp=self._status_for(detected),
+                        language=detected,
+                        lsp_language=lsp_language_id(detected),
+                        lsp_server=detected,
                     )
             except Exception as exc:
-                self._record_failure(exc)
+                self._record_failure(detected, exc)
         items = await codeintel_repository.find_references(
             db,
             workspace_id=workspace_id,
@@ -219,12 +328,16 @@ class LspService:
             symbol_id=symbol_id,
             limit=limit,
         )
+        fallback_reason = self._fallback_reason(detected)
         return LspResult(
             items=items,
             source=SOURCE_STATIC_FALLBACK,
-            lsp_status=self._state.mode,
-            fallback_reason=self._state.last_error,
-            lsp=self.status(),
+            lsp_status=self._state_for(detected).mode,
+            fallback_reason=fallback_reason,
+            lsp=self._status_for(detected),
+            language=detected,
+            lsp_language=lsp_language_id(detected),
+            lsp_server="none",
         )
 
     async def get_diagnostics(
@@ -236,22 +349,27 @@ class LspService:
         severity: str | None = None,
         limit: int = 100,
     ) -> LspResult:
-        self._sync_disabled_state()
-        if file_path and self._should_use_real_lsp():
+        detected = detect_language(file_path or "") or "python"
+        self._sync_disabled_state(detected)
+        if file_path and self._should_use_real_lsp(detected):
             try:
-                diagnostics = await lsp_client.diagnostics(self._resolve_document_path(file_path))
-                self._record_success()
+                client = self._client_for(detected)
+                diagnostics = await client.diagnostics(self._resolve_document_path(file_path, detected))
+                self._record_success(detected)
                 normalized = self._normalize_diagnostics(diagnostics, file_path=file_path)
                 if normalized:
                     return LspResult(
                         items=self._filter_diagnostics(normalized, severity=severity, limit=limit),
                         source=SOURCE_REAL_LSP,
-                        lsp_status=self._state.mode,
+                        lsp_status=self._state_for(detected).mode,
                         fallback_reason=None,
-                        lsp=self.status(),
+                        lsp=self._status_for(detected),
+                        language=detected,
+                        lsp_language=lsp_language_id(detected),
+                        lsp_server=detected,
                     )
             except Exception as exc:
-                self._record_failure(exc)
+                self._record_failure(detected, exc)
         items = await codeintel_repository.list_diagnostics(
             db,
             workspace_id=workspace_id,
@@ -259,88 +377,77 @@ class LspService:
             severity=severity,
             limit=limit,
         )
+        fallback_reason = self._fallback_reason(detected)
         return LspResult(
             items=items,
             source=SOURCE_STATIC_FALLBACK,
-            lsp_status=self._state.mode,
-            fallback_reason=self._state.last_error,
-            lsp=self.status(),
+            lsp_status=self._state_for(detected).mode,
+            fallback_reason=fallback_reason,
+            lsp=self._status_for(detected),
+            language=detected,
+            lsp_language=lsp_language_id(detected),
+            lsp_server="none",
         )
 
-    def _should_use_real_lsp(self) -> bool:
+    def _should_use_real_lsp(self, language: str) -> bool:
         settings = get_settings()
-        self._state.command = settings.lsp.python_command
+        state = self._state_for(language)
+        if language in TS_LANGUAGES:
+            state.command = getattr(settings.lsp, "ts_command", "")
+            return getattr(settings.lsp, "ts_enabled", False)
+        state.command = settings.lsp.python_command
         return settings.lsp.enabled
 
-    def _sync_disabled_state(self) -> None:
-        if get_settings().lsp.enabled:
+    def _sync_disabled_state(self, language: str) -> None:
+        if self._lsp_enabled_for(language):
             return
-        self._state.real_lsp_enabled = False
-        self._state.mode = "static_fallback"
-        self._state.last_error = "Static database index fallback is active."
+        state = self._state_for(language)
+        state.real_lsp_enabled = False
+        state.mode = "static_fallback"
+        state.last_error = "Static database index fallback is active."
 
-    async def _document_symbols_real(self, file_path: str) -> list[dict[str, Any]]:
-        raw_symbols = await lsp_client.document_symbols(self._resolve_document_path(file_path))
-        return self._normalize_document_symbols(raw_symbols, file_path=file_path)
+    def _fallback_reason(self, language: str) -> str | None:
+        state = self._state_for(language)
+        if not self._lsp_enabled_for(language):
+            if language in TS_LANGUAGES:
+                return "typescript_lsp_disabled"
+            return "python_lsp_disabled"
+        return state.last_error
 
-    async def _fallback_definition(
-        self,
-        db: AsyncSession,
-        *,
-        workspace_id: UUID | None,
-        name: str | None,
-        file: str | None,
-        line: int | None,
-    ) -> dict[str, Any] | None:
-        if name:
-            symbols = await codeintel_repository.find_symbols(
-                db,
-                workspace_id=workspace_id,
-                query=name,
-                limit=10,
-            )
-            exact = [symbol for symbol in symbols if symbol["name"] == name]
-            return (exact or symbols)[0] if symbols else None
-        if file and line is not None:
-            symbols = await codeintel_repository.find_symbols(
-                db,
-                workspace_id=workspace_id,
-                file_path=file,
-                limit=200,
-            )
-            containing = [
-                symbol
-                for symbol in symbols
-                if symbol["start_line"] <= line <= (symbol.get("end_line") or symbol["start_line"])
-            ]
-            if containing:
-                return sorted(containing, key=lambda item: item["start_line"], reverse=True)[0]
-        return None
+    def _record_success(self, language: str) -> None:
+        state = self._state_for(language)
+        state.request_count += 1
+        state.real_lsp_enabled = True
+        state.mode = "real_lsp"
+        state.last_error = None
+        state.last_error_type = None
+        if state.started_at is None:
+            state.started_at = datetime.now(UTC)
 
-    def _record_success(self) -> None:
-        self._state.request_count += 1
-        self._state.real_lsp_enabled = True
-        self._state.mode = "real_lsp"
-        self._state.last_error = None
-        self._state.last_error_type = None
-        if self._state.started_at is None:
-            self._state.started_at = datetime.now(UTC)
+    def _record_failure(self, language: str, exc: Exception) -> None:
+        state = self._state_for(language)
+        state.request_count += 1
+        state.failure_count += 1
+        state.real_lsp_enabled = False
+        state.mode = "failed"
+        state.last_error = f"{exc}. Static fallback remains available."
+        state.last_error_type = type(exc).__name__
 
-    def _record_failure(self, exc: Exception) -> None:
-        self._state.request_count += 1
-        self._state.failure_count += 1
-        self._state.real_lsp_enabled = False
-        self._state.mode = "failed"
-        self._state.last_error = f"{exc}. Static fallback remains available."
-        self._state.last_error_type = type(exc).__name__
-
-    def _include_debug_details(self) -> bool:
+    def _include_debug_details(self, state: LspServiceState) -> bool:
         debug_flag = os.getenv("AP_LSP_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}
         ci_flag = os.getenv("CI", "").strip().lower() in {"1", "true", "yes", "on"}
-        return debug_flag or ci_flag or self._state.mode == "failed"
+        return debug_flag or ci_flag or state.mode == "failed"
 
-    def _resolve_document_path(self, file_path: str) -> Path:
-        workspace_root = get_settings().lsp.workspace_root.resolve()
+    def _workspace_root_for(self, language: str) -> Path:
+        settings = get_settings()
+        if language in TS_LANGUAGES:
+            ts_root = settings.lsp.ts_workspace_root
+            if ts_root:
+                return ts_root
+        return settings.lsp.workspace_root
+
+    def _resolve_document_path(self, file_path: str, language: str) -> Path:
+        workspace_root = self._workspace_root_for(language).resolve()
         candidate = Path(file_path)
         resolved = candidate.resolve() if candidate.is_absolute() else (workspace_root / candidate).resolve()
         if not is_inside(workspace_root, resolved):
@@ -508,6 +615,40 @@ class LspService:
     def _lsp_severity(self, severity: Any) -> str:
         mapping = {1: "error", 2: "warning", 3: "info", 4: "hint"}
         return mapping.get(severity, "info")
+
+    async def _fallback_definition(
+        self,
+        db: AsyncSession,
+        *,
+        workspace_id: UUID | None,
+        name: str | None,
+        file: str | None,
+        line: int | None,
+    ) -> dict[str, Any] | None:
+        if name:
+            symbols = await codeintel_repository.find_symbols(
+                db,
+                workspace_id=workspace_id,
+                query=name,
+                limit=10,
+            )
+            exact = [symbol for symbol in symbols if symbol["name"] == name]
+            return (exact or symbols)[0] if symbols else None
+        if file and line is not None:
+            symbols = await codeintel_repository.find_symbols(
+                db,
+                workspace_id=workspace_id,
+                file_path=file,
+                limit=200,
+            )
+            containing = [
+                symbol
+                for symbol in symbols
+                if symbol["start_line"] <= line <= (symbol.get("end_line") or symbol["start_line"])
+            ]
+            if containing:
+                return sorted(containing, key=lambda item: item["start_line"], reverse=True)[0]
+        return None
 
 
 lsp_service = LspService()

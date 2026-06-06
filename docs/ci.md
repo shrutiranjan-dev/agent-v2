@@ -114,6 +114,32 @@ workflow on the public GitHub Actions API; it remains a separate gate
 because the CI is a clean-room compatibility check, not a substitute for
 local Windows validation.
 
+## Real TypeScript LSP CI Job
+
+The `real-typescript-lsp-smoke` job in `.github/workflows/ci.yml` is mandatory in default CI.
+
+Status: `TS_LSP_CI_JOB_ADDED_PENDING_REMOTE_VALIDATION`
+
+It:
+
+1. Installs backend dependencies with `pip install -e ".[test]"`.
+2. Installs frontend dependencies with `npm ci --prefix frontend` (which includes `typescript` and `typescript-language-server` devDependencies).
+3. Applies migrations against a real `pgvector/pgvector:pg16` Postgres service.
+4. Starts the backend on the runner with `AP_TS_LSP_ENABLED=true` and `AP_TS_LSP_COMMAND=./frontend/node_modules/.bin/typescript-language-server --stdio`.
+5. Runs `bash scripts/ts-lsp-smoke.sh --real --base-url http://localhost:8000`.
+6. Requires `TS_LSP=passed` in the smoke log.
+7. Uploads the smoke log, backend log, and response dumps from `/tmp/ts-lsp-smoke/` on failure with 7 day retention.
+
+This job is the CI proof for the real TypeScript/JS LSP path. It does not require Ollama generation and does not pass if the runtime falls back to `static_fallback`.
+
+The real TypeScript LSP path is also valid on local Windows: running
+`scripts/ts-lsp-smoke.ps1 -Real` against a locally running backend with
+`AP_TS_LSP_ENABLED=true` and `AP_TS_LSP_COMMAND=.\frontend\node_modules\.bin\typescript-language-server.cmd --stdio`
+produces the same `TS_LSP=passed` gate locally. The
+`TS_LSP_CI_VALIDATED` label is a **stricter** claim that additionally
+requires the `check-github-actions.ps1` verifier to confirm a green `CI`
+workflow on the public GitHub Actions API.
+
 ## CLI/TUI CI Job
 
 The dedicated `cli-tui-smoke` job in `.github/workflows/ci.yml`:
@@ -137,6 +163,7 @@ CI jobs upload failure artifacts (7 day retention) to the Actions run page:
 - `safe-smokes-backend-log` from the `Safe API Smokes` job (uvicorn log).
 - `cli-tui-smoke-backend-log` from the new `CLI/TUI Smoke` job.
 - `real-python-lsp-smoke-logs` from the `Real Python LSP Smoke` job (`lsp-smoke` output, backend log, and response dumps).
+- `real-ts-lsp-smoke-logs` from the `Real TypeScript LSP Smoke` job (`ts-lsp-smoke` output, backend log, and response dumps).
 - `repo-hygiene-log` from the `Repo Hygiene` job (parity JSON validation output).
 - `manual-smoke-docker-logs` from the `Manual Smoke` workflow (always uploaded, not just on failure).
 

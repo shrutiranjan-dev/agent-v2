@@ -282,6 +282,94 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  real-typescript-lsp-smoke:
+    name: Real TypeScript LSP Smoke
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: agent_platform
+          POSTGRES_USER: agent
+          POSTGRES_PASSWORD: agent
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U agent -d agent_platform"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      AP_ENV: test
+      AP_ENABLE_TEST_ENDPOINTS: "false"
+      AP_DATABASE_URL: postgresql+asyncpg://agent:agent@localhost:5432/agent_platform
+      AP_TEST_POSTGRES_URL: postgresql+psycopg://agent:agent@localhost:5432/agent_platform
+      AP_REDIS_PUBSUB_ENABLED: "false"
+      AP_QUEUE_ENABLED: "false"
+      AP_QDRANT_ENABLED: "false"
+      AP_MEMORY_EMBEDDING_ENABLED: "false"
+      AP_OLLAMA_BASE_URL: http://127.0.0.1:9
+      AP_WORKSPACE_ROOT: ${{ github.workspace }}
+      AP_LSP_ENABLED: "false"
+      AP_TS_LSP_ENABLED: "true"
+      AP_TS_LSP_COMMAND: ./frontend/node_modules/.bin/typescript-language-server --stdio
+      AP_LSP_DEBUG: "true"
+      AP_BASE_URL: http://localhost:8000
+      API_BASE: http://localhost:8000
+      SMOKE_TMP_DIR: /tmp/ts-lsp-smoke
+      BACKEND_LOG_FILE: /tmp/agent-backend.log
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend deps
+        run: npm ci --prefix frontend
+      - name: Install backend deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[test]"
+      - name: Apply migrations
+        run: bash scripts/db-migration-smoke.sh
+      - name: Start backend
+        run: |
+          python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 > /tmp/agent-backend.log 2>&1 &
+          echo $! > /tmp/agent-backend.pid
+          for attempt in {1..60}; do
+            if curl -fsS http://localhost:8000/health >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/agent-backend.log
+          exit 1
+      - name: Run strict real TS LSP smoke
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/ts-lsp-artifacts
+          bash scripts/ts-lsp-smoke.sh --real --base-url http://localhost:8000 2>&1 | tee /tmp/ts-lsp-artifacts/ts-lsp-smoke.log
+          grep -q "TS_LSP=passed" /tmp/ts-lsp-artifacts/ts-lsp-smoke.log
+      - name: Backend logs on failure
+        if: failure()
+        run: cat /tmp/agent-backend.log || true
+      - name: Upload real TS LSP logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-ts-lsp-smoke-logs
+          path: |
+            /tmp/agent-backend.log
+            /tmp/ts-lsp-artifacts/
+            /tmp/ts-lsp-smoke/
+          if-no-files-found: ignore
+          retention-days: 7
+
   cli-tui-smoke:
     name: CLI/TUI Smoke
     runs-on: ubuntu-latest

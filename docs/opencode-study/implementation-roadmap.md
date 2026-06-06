@@ -1409,3 +1409,49 @@ Final validation: `.venv\Scripts\pytest backend\tests` passes with **203 passed,
 2. TypeScript/JS LSP via `typescript-language-server` once Python is proven in CI.
 3. `textDocument/hover`, `textDocument/completion`, and `workspace/symbol` coverage if and when the tool surface needs them.
 
+# TypeScript/JS LSP Batch 1 Implementation Result
+
+Date: 2026-06-07
+
+## TS LSP status
+
+- `TS_LSP_IMPLEMENTED_FAKE_TESTED`: fake TypeScript LSP server (`backend/tests/fixtures/fake_ts_lsp_server.py`) exercises document symbols (function `greet`, class `Greeter`), definition, references, and diagnostics against the same `LspClient` / JSON-RPC lifecycle used by the Python path.
+- `TS_LSP_CI_JOB_ADDED_PENDING_REMOTE_VALIDATION`: a mandatory `real-typescript-lsp-smoke` CI job is added to `.github/workflows/ci.yml`. It installs Node 20 + `npm ci --prefix frontend`, starts the backend with `AP_TS_LSP_ENABLED=true AP_TS_LSP_COMMAND=./frontend/node_modules/.bin/typescript-language-server --stdio`, and runs `scripts/ts-lsp-smoke.sh --real`. The verifier has not yet confirmed a green CI run against the public GitHub Actions API, so the status is not `TS_LSP_CI_VALIDATED`.
+- Live real TS LSP local smoke is supported: `powershell -ExecutionPolicy Bypass -File scripts/ts-lsp-smoke.ps1 -Real` prints `TS_LSP=passed` after verifying Node/npm/typescript-language-server availability and observing `source: real_lsp` with `lsp_server: typescript` in a `/code/symbols` response body. Default mode prints `TS_LSP=disabled_static_fallback`.
+
+## Implementation details
+
+- `backend/app/codeintel/language.py`: extension-to-language mapping includes `.ts` → `typescript`, `.tsx` → `typescriptreact`, `.js` → `javascript`, `.jsx` → `javascriptreact`, `.mjs`/`.cjs` → `javascript`, `.mts`/`.cts` → `typescript`. LSP language IDs match the spec.
+- `backend/app/core/config.py`: `LspConfig` includes `ts_enabled`, `ts_command`, `ts_startup_timeout_seconds`, `ts_request_timeout_seconds`, `ts_shutdown_timeout_seconds`, `ts_max_response_chars`, `ts_workspace_root` fields, all with override support via `AP_TS_LSP_*` env vars.
+- `backend/app/codeintel/lsp_client.py`: `LspClient` is now language-aware (`_language` parameter). `_get_settings_attr` routes Python settings normally and TypeScript settings via `ts_` prefix. `MultiLanguageLspClient` manages separate `LspClient` instances for `python`, `typescript`, `typescriptreact`, `javascript`, `javascriptreact`. `_build_env` includes Node/npm/npx PATH discovery for TS languages. `_validate_workspace_root` and `_validate_document_path` route to the correct workspace root per language. `_node_check()` reports `node --version`, `npm --version`, and `typescript-language-server --version` availability.
+- `backend/app/codeintel/lsp_service.py`: `LspService` maintains separate state tracking for Python and TypeScript LSP. Language is detected from file extension and routed to the correct client. `LspResult` dataclass now includes `language`, `lsp_language`, and `lsp_server` fields. `/health/codeintel` returns both `python` and `typescript` LSP server status under `lsp_servers`, with backward-compatible top-level fields.
+- `backend/app/api/routes_codeintel.py` and `backend/app/tools/codeintel.py`: all responses include `language`, `lsp_language`, and `lsp_server` metadata.
+
+## Test coverage
+
+- 11 new TS LSP tests added to `backend/tests/test_codeintel.py`:
+  - TS disabled → static fallback with `lsp_server=none`
+  - Fake TS LSP symbols: `greet` and `Greeter` returned with `source=real_lsp`, `lsp_server=typescript`
+  - Fake TS LSP definition: returns definition location with `source=real_lsp`
+  - Fake TS LSP references: returns 2 references with `source=real_lsp`
+  - Fake TS LSP diagnostics: returns TS warning with `source=real_lsp`
+  - Health includes both Python and TS LSP state
+  - Missing TS command → fallback, not crash
+  - TS workspace root safety (outside root blocked)
+  - Route response includes `lsp_server=typescript`
+  - Tool response includes `lsp_server=typescriptreact`
+  - `typescript-language-server --stdio` command parsing
+- New `backend/tests/fixtures/fake_ts_lsp_server.py`: handles initialize, initialized, shutdown, exit, `textDocument/didOpen`, `textDocument/documentSymbol`, `textDocument/definition`, `textDocument/references`, and `publishDiagnostics`.
+- All existing Python LSP tests (24) continue to pass unchanged.
+
+Final validation: `.venv\Scripts\pytest backend\tests` passes with **223 passed, 4 skipped** (was 212 + 4 skipped before this batch). `.venv\Scripts\python -m compileall backend\app` and `.venv\Scripts\python -m ruff check backend\app backend\tests` pass.
+
+- Code Intelligence and LSP: `verified_percent` raised from 86 to 90, status remains `PARTIAL` (only Python + TS/JS LSP covered; other languages are static-only). Python LSP is `REAL_LSP_CI_VALIDATED`. TypeScript/JS LSP is `TS_LSP_IMPLEMENTED_FAKE_TESTED` with `TS_LSP_CI_JOB_ADDED_PENDING_REMOTE_VALIDATION`.
+
+## Remaining LSP gaps
+
+1. TS LSP CI validation: the `real-typescript-lsp-smoke` CI job is added but the verifier has not yet confirmed a green run. After confirmation, status becomes `TS_LSP_CI_VALIDATED`.
+2. Other languages beyond Python and TypeScript/JS (Rust, Go, etc.).
+3. `textDocument/hover`, `textDocument/completion`, and `workspace/symbol` coverage.
+4. Multi-document workspace diagnostics and incremental sync.
+
