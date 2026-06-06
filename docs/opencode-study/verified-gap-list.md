@@ -14,7 +14,7 @@ Latest batch: `P0 CI + CLI/TUI release hardening` (DONE; see implementation-road
 
 1. GitHub bot/workflow parity is largely missing or not proven: webhook handling, signature validation, issue/PR comment command parsing, session lifecycle, plan posting, branch commits, and PR creation.
 2. Real LSP parity: the LSP-backed service path, response honesty fields, and fake-LSP lifecycle are now implemented and tested. Live real-pylsp 1.14.0 end-to-end smoke was run in this audit against the Docker backend with `AP_LSP_ENABLED=true AP_LSP_PYTHON_COMMAND=pylsp`, printing `REAL_LSP=passed` after `/code/symbols` and `/code/definition` returned `source: real_lsp` with `lsp_status: real_lsp`. Status is now `REAL_LSP_VALIDATED` for the Python LSP path. TypeScript/JS LSP is still future.
-3. Real LSP CI follow-through is now `REAL_LSP_CI_JOB_ADDED_PENDING_REMOTE_VALIDATION`: a mandatory `real-python-lsp-smoke` job has been added to default CI, but this session has not yet observed the remote GitHub Actions run turn green.
+3. Real LSP CI follow-through is now `REAL_LSP_CI_VALIDATED`: the mandatory `real-python-lsp-smoke` job is in default CI and has now passed remotely.
 3. MCP parity is partial: stdio is implemented, but HTTP/SSE transports, OAuth/auth, and sandboxed plugin execution are absent or not proven.
 4. Provider/model parity is partial: Ollama works locally, but embeddings, token/cost accounting, model management UX, and multi-provider routing are not proven.
 5. Artifact/report parity is partial: artifact routes and storage exist, but signed downloads, report packaging, export flows, previews, and retention controls are not proven.
@@ -57,6 +57,6 @@ The P0 batch alone raises CI/release confidence from PARTIAL_BLOCKED to PARTIAL_
 
 1. GitHub bot/workflow automation.
 2. CI green status (improved tooling; live green confirmation still pending the next push).
-3. Real LSP remote CI confirmation: protocol path is implemented and locally validated with real `pylsp`, and the mandatory CI job is now present, but the status remains `REAL_LSP_CI_JOB_ADDED_PENDING_REMOTE_VALIDATION` until GitHub Actions proves it green.
+3. Real LSP enabled-mode operation is now validated both locally and in GitHub Actions for the Python `pylsp` path. TypeScript/JS LSP is still future.
 4. MCP HTTP/SSE/OAuth/plugin execution parity.
 5. Production artifact/report/export flow.

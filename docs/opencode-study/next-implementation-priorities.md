@@ -2,7 +2,7 @@
 
 Audit commit: `8d63be8`
 Latest batch: `P0 CI + CLI/TUI release hardening` (DONE — see implementation-roadmap.md and the latest commit for the resolution).
-Latest LSP progress: `Real LSP CI follow-through` (job added; current status `REAL_LSP_CI_JOB_ADDED_PENDING_REMOTE_VALIDATION` until GitHub Actions runs it green).
+Latest LSP progress: `Real LSP CI follow-through` (done; current status `REAL_LSP_CI_VALIDATED`).
 
 ## 1. Restore Green CI
 
@@ -92,7 +92,7 @@ Implemented in this batch:
 6. Fake LSP lifecycle is now covered by `test_lsp_client_lifecycle_via_fake_server`, `test_lsp_service_real_path_via_fake_server_includes_source_real_lsp`, missing-command fallback, static-fallback source fields, and route/tool honesty assertions.
 7. `docker-compose.yml` now threads `AP_LSP_*` env vars into the backend service so real-mode validation is reproducible with `AP_LSP_ENABLED=true AP_LSP_PYTHON_COMMAND=pylsp docker-compose up -d --build backend`.
 8. Real-pylsp end-to-end smoke was run live in this audit against `python-lsp-server 1.14.0` and printed `REAL_LSP=passed` after `/code/symbols` and `/code/definition` returned `source: real_lsp` with `lsp_status: real_lsp`.
-9. A mandatory `real-python-lsp-smoke` job has now been added to default CI. It installs `python-lsp-server`, starts the backend with `AP_LSP_ENABLED=true`, runs `scripts/lsp-smoke.sh --real`, and requires `REAL_LSP=passed`. Because this session has not yet observed the GitHub Actions result, the docs remain `REAL_LSP_CI_JOB_ADDED_PENDING_REMOTE_VALIDATION`.
+9. A mandatory `real-python-lsp-smoke` job is now part of default CI. It installs `python-lsp-server`, starts the backend with `AP_LSP_ENABLED=true`, runs `scripts/lsp-smoke.sh --real`, requires `REAL_LSP=passed`, and is now marked `REAL_LSP_CI_VALIDATED`.
 
 Acceptance:
 

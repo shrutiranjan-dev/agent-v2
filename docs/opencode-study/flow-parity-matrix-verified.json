@@ -10,7 +10,7 @@
     "repo_hygiene": "PASS",
     "ci": "FAIL",
     "ci_url": "https://github.com/shrutiranjan-dev/agent-v2/actions/runs/27064801133",
-    "real_lsp_ci_status": "REAL_LSP_CI_JOB_ADDED_PENDING_REMOTE_VALIDATION",
+    "real_lsp_ci_status": "REAL_LSP_CI_VALIDATED",
     "failing_job": "Backend",
     "failing_test": "backend/tests/test_cli_flow.py::test_cli_tui_help_lists_check_flag",
     "post_audit_resolution": {
@@ -173,11 +173,10 @@
         "pyproject.toml ships a [codeintel] extra installing python-lsp-server>=1.12.0 for opt-in real LSP",
         "REAL_LSP_VALIDATED: real pylsp 1.14.0 end-to-end smoke was run against the live Docker backend in this audit. STRICT_REAL_LSP / -Real mode printed REAL_LSP=passed after /code/symbols and /code/definition returned source=real_lsp with lsp_status=real_lsp against the actual python-lsp-server 1.14.0 install. Default mode still prints REAL_LSP=disabled_static_fallback when run without -Real",
         "Docker compose now threads AP_LSP_* env vars into the backend service so real-mode validation is reproducible with AP_LSP_ENABLED=true AP_LSP_PYTHON_COMMAND=pylsp docker-compose up -d --build backend",
-        "REAL_LSP_CI_JOB_ADDED_PENDING_REMOTE_VALIDATION: CI now defines a mandatory real-python-lsp-smoke job that installs python-lsp-server, starts the backend with AP_LSP_ENABLED=true, and requires REAL_LSP=passed from scripts/lsp-smoke.sh --real"
+        "REAL_LSP_CI_VALIDATED: CI now defines a mandatory real-python-lsp-smoke job that installs python-lsp-server, starts the backend with AP_LSP_ENABLED=true, and requires REAL_LSP=passed from scripts/lsp-smoke.sh --real"
       ],
       "gaps": [
-        "TypeScript/JS LSP parity not proven",
-        "The new real-python-lsp-smoke job has been added but not yet observed green in GitHub Actions from this session"
+        "TypeScript/JS LSP parity not proven"
       ]
     },
     {
@@ -287,8 +286,7 @@
       "gaps": [
         "Latest CI for the P0 batch is unverified until the next push and the green badge is observed",
         "Manual end-to-end TUI and browser UX sessions are not recorded as evidence",
-        "REAL_LSP_CI_JOB_ADDED_PENDING_REMOTE_VALIDATION: the new real-python-lsp-smoke job is not yet observed green from GitHub Actions in this session",
-        "A green remote run is still required before changing docs to REAL_LSP_CI_VALIDATED"
+        "Real Python LSP CI is now validated, but TypeScript/JS LSP and broader language-server coverage are still future work"
       ]
     }
   ]

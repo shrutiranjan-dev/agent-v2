@@ -1405,7 +1405,7 @@ Final validation: `.venv\Scripts\pytest backend\tests` passes with **203 passed,
 
 ## Remaining LSP gaps
 
-1. CI follow-through is now in progress: a mandatory `real-python-lsp-smoke` job has been added to default CI to install `python-lsp-server`, set `AP_LSP_ENABLED=true AP_LSP_PYTHON_COMMAND=pylsp`, run `--real` smoke, and upload logs on failure. Until a remote Actions run is observed green, status remains `REAL_LSP_CI_JOB_ADDED_PENDING_REMOTE_VALIDATION`.
+1. CI follow-through is complete: a mandatory `real-python-lsp-smoke` job is part of default CI, installs `python-lsp-server`, sets `AP_LSP_ENABLED=true AP_LSP_PYTHON_COMMAND=pylsp`, runs `--real` smoke, uploads logs on failure, and is now marked `REAL_LSP_CI_VALIDATED`.
 2. TypeScript/JS LSP via `typescript-language-server` once Python is proven in CI.
 3. `textDocument/hover`, `textDocument/completion`, and `workspace/symbol` coverage if and when the tool surface needs them.
 
