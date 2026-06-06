@@ -222,6 +222,7 @@ jobs:
       AP_OLLAMA_BASE_URL: http://127.0.0.1:9
       AP_WORKSPACE_ROOT: ${{ github.workspace }}
       AP_LSP_ENABLED: "true"
+      AP_LSP_DEBUG: "true"
       AP_LSP_PYTHON_COMMAND: python -m pylsp
       AP_BASE_URL: http://localhost:8000
       API_BASE: http://localhost:8000
@@ -242,7 +243,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[test,codeintel]"
       - name: Verify pylsp import
-        run: python -c "import pylsp; print('pylsp ok')"
+        run: |
+          python -c "import sys; print(sys.executable)"
+          python -c "import pylsp; print(getattr(pylsp, '__file__', 'unknown'))"
+          python -c "import pylsp; print('pylsp ok')"
       - name: Apply migrations
         run: bash scripts/db-migration-smoke.sh
       - name: Start backend

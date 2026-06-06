@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import importlib.util
 import json
 import os
+import platform
 import shlex
 import shutil
+import sys
 from collections import deque
 from pathlib import Path
 from typing import Any
@@ -50,6 +53,9 @@ class LspClient:
         self._diagnostics_by_uri: dict[str, list[dict[str, Any]]] = {}
         self._command: str | None = None
         self._capabilities: dict[str, Any] = {}
+        self._configured_command: str | None = None
+        self._resolved_command: list[str] = []
+        self._spawn_debug: dict[str, Any] = {}
 
     async def health(self, workspace_root: Path) -> dict[str, Any]:
         try:
@@ -60,12 +66,14 @@ class LspClient:
                 "command": self._command or get_settings().lsp.python_command,
                 "last_error": redact_text(str(exc)),
                 "running": False,
+                "debug": self.debug_snapshot(error=exc),
             }
         return {
             "status": "ok",
             "command": self._command,
             "last_error": None,
             "running": self._is_running(),
+            "debug": self.debug_snapshot(),
         }
 
     async def initialize(self, workspace_root: Path) -> dict[str, Any]:
@@ -163,17 +171,39 @@ class LspClient:
 
     async def _restart_locked(self, workspace_root: Path) -> None:
         await self._shutdown_locked()
-        command_parts = self._resolve_command(get_settings().lsp.python_command)
+        self._configured_command = get_settings().lsp.python_command
+        command_parts = self._resolve_command(self._configured_command)
+        if isinstance(command_parts, str):
+            command_parts = [command_parts]
+        self._resolved_command = list(command_parts)
         self._command = " ".join(command_parts)
         env = self._build_env()
-        self._process = await asyncio.create_subprocess_exec(
-            *command_parts,
-            cwd=str(workspace_root),
-            env=env,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
+        self._spawn_debug = {
+            "configured_command": self._configured_command,
+            "resolved_command": list(command_parts),
+            "spawn_argv": list(command_parts),
+            "command_exists": bool(command_parts and Path(command_parts[0]).exists()),
+            "cwd": str(workspace_root),
+            "workspace_root": str(workspace_root.resolve()),
+            "spawn_env_path": env.get("PATH"),
+            "spawn_env_pythonpath": env.get("PYTHONPATH"),
+            "spawn_env_ld_library_path": env.get("LD_LIBRARY_PATH"),
+            "spawn_env_virtual_env": env.get("VIRTUAL_ENV"),
+            "spawn_env_keys": sorted(env.keys()),
+        }
+        try:
+            self._process = await asyncio.create_subprocess_exec(
+                *command_parts,
+                cwd=str(workspace_root),
+                env=env,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        except Exception as exc:
+            self._spawn_debug["last_error_type"] = type(exc).__name__
+            self._spawn_debug["last_error"] = redact_text(str(exc))
+            raise
         self._stdout = self._process.stdout
         self._workspace_root = workspace_root
         self._opened_documents.clear()
@@ -342,11 +372,8 @@ class LspClient:
         return [resolved, *parts[1:]]
 
     def _build_env(self) -> dict[str, str]:
-        env: dict[str, str] = {"PYTHONUNBUFFERED": "1"}
-        for key in ["PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "TMP", "TEMP", "HOME", "USERPROFILE"]:
-            value = os.environ.get(key)
-            if value:
-                env[key] = value
+        env = dict(os.environ)
+        env["PYTHONUNBUFFERED"] = "1"
         return env
 
     async def _capture_stderr(self, stream: asyncio.StreamReader | None) -> None:
@@ -365,6 +392,41 @@ class LspClient:
 
     def last_error_details(self) -> str | None:
         return self._stderr_text or None
+
+    def debug_snapshot(self, *, error: Exception | None = None) -> dict[str, Any]:
+        pylsp_spec = importlib.util.find_spec("pylsp")
+        snapshot = {
+            "configured_command": self._configured_command or get_settings().lsp.python_command,
+            "resolved_command": list(self._resolved_command),
+            "command": self._command or get_settings().lsp.python_command,
+            "command_exists": bool(self._resolved_command and Path(self._resolved_command[0]).exists()),
+            "cwd": self._spawn_debug.get("cwd"),
+            "workspace_root": self._spawn_debug.get("workspace_root")
+            or str(get_settings().lsp.workspace_root.resolve()),
+            "path": os.environ.get("PATH"),
+            "spawn_env_path": self._spawn_debug.get("spawn_env_path"),
+            "spawn_env_pythonpath": self._spawn_debug.get("spawn_env_pythonpath"),
+            "spawn_env_ld_library_path": self._spawn_debug.get("spawn_env_ld_library_path"),
+            "spawn_env_virtual_env": self._spawn_debug.get("spawn_env_virtual_env"),
+            "spawn_env_keys": self._spawn_debug.get("spawn_env_keys", []),
+            "python_executable": shutil.which("python"),
+            "python3_executable": shutil.which("python3"),
+            "sys_executable": sys.executable,
+            "platform": platform.platform(),
+            "pylsp_import_check": {
+                "available": pylsp_spec is not None,
+                "origin": getattr(pylsp_spec, "origin", None),
+            },
+            "stderr_tail": self.last_error_details(),
+            "running": self._is_running(),
+        }
+        if error is not None:
+            snapshot["last_error_type"] = type(error).__name__
+            snapshot["last_error"] = redact_text(str(error))
+        elif self._spawn_debug.get("last_error"):
+            snapshot["last_error_type"] = self._spawn_debug.get("last_error_type")
+            snapshot["last_error"] = self._spawn_debug.get("last_error")
+        return snapshot
 
     def resolve_uri_path(self, uri: str) -> Path:
         parsed = urlparse(uri)

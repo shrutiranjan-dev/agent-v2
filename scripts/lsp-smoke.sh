@@ -58,6 +58,11 @@ export SMOKE_TMP_DIR SMOKE_TMP_DIR_PY LSP_SMOKE_FILE STRICT_REAL_LSP
 
 dump_diagnostics() {
   echo "lsp smoke diagnostics:"
+  echo "--- shell/python resolution ---"
+  command -v python || true
+  command -v python3 || true
+  python -c "import sys; print(sys.executable)" || true
+  python -c "import pylsp; print(getattr(pylsp, '__file__', 'unknown'))" || true
   if [[ -f "${SMOKE_TMP_DIR}/lsp-health.json" ]]; then
     echo "--- /health/codeintel ---"
     cat "${SMOKE_TMP_DIR}/lsp-health.json"
@@ -101,6 +106,8 @@ echo "lsp smoke: backend=${API_BASE}"
 echo "lsp smoke: workspace_path=${LSP_SMOKE_WORKSPACE_PATH}"
 echo "lsp smoke: file=${LSP_SMOKE_FILE}"
 echo "lsp smoke: real_mode=${REAL_MODE} skip_real_if_missing=${SKIP_REAL_IF_MISSING}"
+echo "lsp smoke: python=$(command -v python || true)"
+echo "lsp smoke: python3=$(command -v python3 || true)"
 
 if [[ "${REAL_MODE}" == "1" ]]; then
   if ! "${PYTHON_BIN}" -c "import pylsp" 2>/dev/null; then

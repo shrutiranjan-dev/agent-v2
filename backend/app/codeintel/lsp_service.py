@@ -25,6 +25,7 @@ class LspServiceState:
     mode: str = "static_fallback"
     command: str | None = None
     last_error: str | None = None
+    last_error_type: str | None = None
     started_at: datetime | None = None
     request_count: int = 0
     failure_count: int = 0
@@ -50,6 +51,7 @@ class LspService:
             self._state.real_lsp_enabled = False
             self._state.mode = "static_fallback"
             self._state.last_error = "Static database index fallback is active."
+            self._state.last_error_type = None
             return self.status()
         try:
             await lsp_client.initialize(settings.lsp.workspace_root)
@@ -57,28 +59,34 @@ class LspService:
             self._state.real_lsp_enabled = False
             self._state.mode = "failed"
             self._state.last_error = f"{exc}. Static fallback remains available."
+            self._state.last_error_type = type(exc).__name__
             return self.status()
         self._state.real_lsp_enabled = True
         self._state.mode = "real_lsp"
         self._state.last_error = None
+        self._state.last_error_type = None
         if self._state.started_at is None:
             self._state.started_at = datetime.now(UTC)
         return self.status()
 
     def status(self) -> dict[str, Any]:
         started_iso = self._state.started_at.isoformat() if self._state.started_at else None
-        return {
+        payload = {
             "status": "ok" if self._state.real_lsp_enabled else "degraded",
             "mode": self._state.mode,
             "real_lsp_enabled": self._state.real_lsp_enabled,
             "command": self._state.command or get_settings().lsp.python_command,
             "last_error": self._state.last_error,
+            "last_error_type": self._state.last_error_type,
             "started_at": started_iso,
             "started": started_iso,
             "request_count": self._state.request_count,
             "failure_count": self._state.failure_count,
             "reason": self._state.last_error,
         }
+        if self._include_debug_details():
+            payload["debug"] = lsp_client.debug_snapshot()
+        return payload
 
     async def shutdown(self) -> dict[str, Any]:
         result = await lsp_client.shutdown()
@@ -86,9 +94,11 @@ class LspService:
         if get_settings().lsp.enabled:
             self._state.mode = "failed"
             self._state.last_error = "Real LSP client stopped. Static fallback remains available."
+            self._state.last_error_type = "RuntimeError"
         else:
             self._state.mode = "static_fallback"
             self._state.last_error = "Static database index fallback is active."
+            self._state.last_error_type = None
         return result
 
     async def document_symbols(
@@ -312,6 +322,7 @@ class LspService:
         self._state.real_lsp_enabled = True
         self._state.mode = "real_lsp"
         self._state.last_error = None
+        self._state.last_error_type = None
         if self._state.started_at is None:
             self._state.started_at = datetime.now(UTC)
 
@@ -321,6 +332,12 @@ class LspService:
         self._state.real_lsp_enabled = False
         self._state.mode = "failed"
         self._state.last_error = f"{exc}. Static fallback remains available."
+        self._state.last_error_type = type(exc).__name__
+
+    def _include_debug_details(self) -> bool:
+        debug_flag = os.getenv("AP_LSP_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}
+        ci_flag = os.getenv("CI", "").strip().lower() in {"1", "true", "yes", "on"}
+        return debug_flag or ci_flag or self._state.mode == "failed"
 
     def _resolve_document_path(self, file_path: str) -> Path:
         workspace_root = get_settings().lsp.workspace_root.resolve()
