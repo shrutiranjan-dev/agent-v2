@@ -1038,3 +1038,19 @@
 - Exact files: `scripts/lsp-smoke.sh`, `scripts/codeintel-smoke.sh`.
 - Exact recommended next fix: run `scripts/lsp-smoke.sh` in Docker CI twice when feasible, once in fallback mode and once with `AP_LSP_ENABLED=true` and a real `pylsp` install.
 - Risk if ignored: the script exists and local runs are possible, but CI will not automatically prove both fallback and real-LSP startup paths.
+
+## Queue and worker dashboard
+
+- Current improvement: added `worker_heartbeats`, queue operator APIs, retry/cancel controls, and a runtime dashboard tab for queue depth, worker heartbeat state, and recent queue jobs.
+- Why it matters: operators can now see whether workers are alive, whether jobs are failing or piling up, and can manually retry or cancel safe queue states without dropping into SQL or raw API calls.
+- Exact files: `backend/app/queue/worker.py`, `backend/app/queue/worker_heartbeats.py`, `backend/app/api/routes_queue.py`, `frontend/src/api/client.ts`, `frontend/src/pages/Dashboard.tsx`, `frontend/src/components/EventStream.tsx`.
+- Exact recommended next fix: add queue/worker websocket fanout or SSE updates so the runtime tab is push-driven instead of polling every few seconds.
+- Risk if ignored: visibility is much better, but rapid queue churn can still appear stale between polling intervals.
+
+## Queue worker smoke
+
+- Current improvement: added `scripts/queue-worker-smoke.sh`.
+- Why it matters: the runtime can now prove the new queue observability endpoints and manual retry/cancel controls against a live Postgres-backed backend instead of only unit tests.
+- Exact files: `scripts/queue-worker-smoke.sh`, `.env.example`.
+- Exact recommended next fix: run the smoke in Docker CI after migrations with the backend worker enabled so heartbeat payloads are always exercised in addition to API row mutations.
+- Risk if ignored: local development has a deterministic smoke path, but deployment drift in the queue endpoints or worker heartbeat lifecycle could still hide until manual verification.

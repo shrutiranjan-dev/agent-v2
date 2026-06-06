@@ -274,6 +274,64 @@ export type DependencyHealth = {
   dependencies: Record<string, { status: string; error?: string; [key: string]: unknown }>;
 };
 
+export type QueueStats = {
+  queued: number;
+  claimed: number;
+  running: number;
+  completed: number;
+  failed: number;
+  dead_letter: number;
+  cancelled: number;
+  retry_scheduled: number;
+  oldest_queued_age_seconds?: number | null;
+  total: number;
+};
+
+export type QueueJob = {
+  id: string;
+  queue_job_id: string;
+  job_type: string;
+  status: string;
+  priority: number;
+  run_id?: string | null;
+  session_id?: string | null;
+  permission_request_id?: string | null;
+  human_input_request_id?: string | null;
+  user_message_id?: string | null;
+  idempotency_key: string;
+  attempt_count: number;
+  max_attempts: number;
+  claimed_by?: string | null;
+  claimed_at?: string | null;
+  available_at: string;
+  completed_at?: string | null;
+  failed_at?: string | null;
+  last_error?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type QueueWorker = {
+  id: string;
+  worker_id: string;
+  hostname?: string | null;
+  process_id?: number | null;
+  status: string;
+  current_queue_job_id?: string | null;
+  current_run_id?: string | null;
+  claimed_jobs_count: number;
+  completed_jobs_count: number;
+  failed_jobs_count: number;
+  last_heartbeat_at: string;
+  last_heartbeat_age_seconds: number;
+  started_at?: string | null;
+  stopped_at?: string | null;
+  stale: boolean;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
 export type SessionDetail = {
   session: Session;
   messages: Message[];
@@ -372,6 +430,19 @@ export const api = {
     request<PermissionReplyResponse>(`/permissions/${id}/deny`, { method: "POST", body: JSON.stringify({}) }),
   artifacts: () => request<{ artifacts: Array<Record<string, unknown>> }>("/artifacts"),
   events: () => request<{ events: SystemEvent[] }>("/system/events"),
+  queueStats: () => request<{ stats: QueueStats; queue_enabled: boolean }>("/queue/stats"),
+  queueJobs: () => request<{ jobs: QueueJob[] }>("/queue/jobs?limit=50"),
+  queueWorkers: () => request<{ workers: QueueWorker[] }>("/queue/workers"),
+  retryQueueJob: (id: string, reason = "manual_retry") =>
+    request<{ job: QueueJob }>(`/queue/jobs/${id}/retry`, {
+      method: "POST",
+      body: JSON.stringify({ reason })
+    }),
+  cancelQueueJob: (id: string, reason = "manual_cancel") =>
+    request<{ job: QueueJob }>(`/queue/jobs/${id}/cancel`, {
+      method: "POST",
+      body: JSON.stringify({ reason })
+    }),
   codeIntelHealth: () => request<CodeIntelHealth>("/health/codeintel"),
   mcpHealth: () => request<ExtensionHealth>("/health/mcp"),
   pluginHealth: () => request<ExtensionHealth>("/health/plugins"),

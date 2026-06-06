@@ -332,6 +332,35 @@ class QueueJobRecord(Base, TimestampMixin):
     last_error: Mapped[str | None] = mapped_column(Text)
 
 
+class WorkerHeartbeat(Base, TimestampMixin):
+    __tablename__ = "worker_heartbeats"
+    __table_args__ = (
+        UniqueConstraint("worker_id", name="uq_worker_heartbeats_worker_id"),
+        Index("ix_worker_heartbeats_status", "status"),
+        Index("ix_worker_heartbeats_last_heartbeat", "last_heartbeat_at"),
+        Index("ix_worker_heartbeats_current_queue_job", "current_queue_job_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    worker_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    hostname: Mapped[str | None] = mapped_column(String(255))
+    process_id: Mapped[int | None] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(40), default="starting", nullable=False)
+    current_queue_job_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("queue_jobs.id", ondelete="SET NULL")
+    )
+    current_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("agent_runs.id", ondelete="SET NULL")
+    )
+    claimed_jobs_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    completed_jobs_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    failed_jobs_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_heartbeat_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, nullable=False)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    stopped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
+
+
 class ModelProvider(Base, TimestampMixin):
     __tablename__ = "model_providers"
     __table_args__ = (UniqueConstraint("organization_id", "name", name="uq_model_providers_org_name"),)

@@ -28,6 +28,10 @@ class JobClaimError(RuntimeError):
     pass
 
 
+class QueueJobStateError(RuntimeError):
+    pass
+
+
 class JobType(StrEnum):
     AGENT_RUN = "agent_run"
     PERMISSION_RESUME = "permission_resume"
@@ -606,6 +610,157 @@ def serialize_job(job: QueueJob | QueueJobRecord) -> dict[str, Any]:
     return json.loads(job.model_dump_json())
 
 
+async def list_jobs(
+    db: AsyncSession,
+    *,
+    status: str | None = None,
+    job_type: str | None = None,
+    session_id: UUID | None = None,
+    run_id: UUID | None = None,
+    permission_request_id: UUID | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[QueueJobRecord]:
+    rows = await _list_jobs_raw(db)
+    filtered = [
+        row
+        for row in rows
+        if (status is None or row.status == status)
+        and (job_type is None or row.job_type == job_type)
+        and (session_id is None or row.session_id == session_id)
+        and (run_id is None or row.run_id == run_id)
+        and (permission_request_id is None or row.permission_request_id == permission_request_id)
+    ]
+    ordered = sorted(filtered, key=lambda row: (row.created_at, row.id), reverse=True)
+    return ordered[offset : offset + limit]
+
+
+async def get_job_record(db: AsyncSession, queue_job_id: UUID) -> QueueJobRecord | None:
+    return await db.get(QueueJobRecord, queue_job_id)
+
+
+async def queue_stats(db: AsyncSession) -> dict[str, Any]:
+    rows = await _list_jobs_raw(db)
+    now = datetime.now(UTC)
+    counts = {
+        "queued": 0,
+        "claimed": 0,
+        "running": 0,
+        "completed": 0,
+        "failed": 0,
+        "dead_letter": 0,
+        "cancelled": 0,
+        "retry_scheduled": 0,
+    }
+    oldest_queued_age_seconds: float | None = None
+    for row in rows:
+        if row.status in counts:
+            counts[row.status] += 1
+        if row.status == JobStatus.QUEUED:
+            age = max((now - row.created_at).total_seconds(), 0.0)
+            if oldest_queued_age_seconds is None or age > oldest_queued_age_seconds:
+                oldest_queued_age_seconds = age
+        if row.status == JobStatus.QUEUED and row.available_at and row.available_at > now:
+            counts["retry_scheduled"] += 1
+    return {
+        **counts,
+        "oldest_queued_age_seconds": round(oldest_queued_age_seconds, 3) if oldest_queued_age_seconds is not None else None,
+        "total": len(rows),
+    }
+
+
+async def retry_job(
+    db: AsyncSession,
+    *,
+    queue_job_id: UUID,
+    reason: str = "manual_retry",
+) -> QueueJobRecord:
+    job = await db.get(QueueJobRecord, queue_job_id)
+    if job is None:
+        raise KeyError(f"Queue job not found: {queue_job_id}")
+    if job.status not in {JobStatus.FAILED, JobStatus.DEAD_LETTER, JobStatus.CANCELLED}:
+        raise QueueJobStateError(f"Queue job {queue_job_id} cannot be retried from status {job.status}.")
+    previous_status = job.status
+    now = datetime.now(UTC)
+    job.status = JobStatus.QUEUED
+    job.attempt_count = 0
+    job.claimed_by = None
+    job.claimed_at = None
+    job.available_at = now
+    job.completed_at = None
+    job.failed_at = None
+    job.last_error = None
+    job.updated_at = now
+    await db.flush()
+    await event_bus.publish(
+        db,
+        event_type=EventType.QUEUE_JOB_RETRY_REQUESTED,
+        session_id=job.session_id,
+        agent_run_id=job.run_id,
+        severity="warning",
+        payload={
+            "queue_job_id": str(job.id),
+            "job_type": job.job_type,
+            "previous_status": previous_status,
+            "reason": reason,
+        },
+    )
+    return job
+
+
+async def cancel_job(
+    db: AsyncSession,
+    *,
+    queue_job_id: UUID,
+    reason: str = "manual_cancel",
+) -> QueueJobRecord:
+    job = await db.get(QueueJobRecord, queue_job_id)
+    if job is None:
+        raise KeyError(f"Queue job not found: {queue_job_id}")
+    if job.status == JobStatus.COMPLETED:
+        raise QueueJobStateError(f"Queue job {queue_job_id} is already completed and cannot be cancelled.")
+    if job.status == JobStatus.RUNNING:
+        raise QueueJobStateError(f"Queue job {queue_job_id} is running and safe cancellation is not supported.")
+    if job.status == JobStatus.CLAIMED and not _job_claim_is_stale(job):
+        raise QueueJobStateError(f"Queue job {queue_job_id} is actively claimed and cannot be cancelled.")
+    if job.status not in {JobStatus.QUEUED, JobStatus.CLAIMED}:
+        raise QueueJobStateError(f"Queue job {queue_job_id} cannot be cancelled from status {job.status}.")
+    previous_status = job.status
+    now = datetime.now(UTC)
+    await event_bus.publish(
+        db,
+        event_type=EventType.QUEUE_JOB_CANCEL_REQUESTED,
+        session_id=job.session_id,
+        agent_run_id=job.run_id,
+        severity="warning",
+        payload={
+            "queue_job_id": str(job.id),
+            "job_type": job.job_type,
+            "previous_status": previous_status,
+            "reason": reason,
+        },
+    )
+    job.status = JobStatus.CANCELLED
+    job.claimed_at = None
+    job.claimed_by = None
+    job.updated_at = now
+    await db.flush()
+    await event_bus.publish(
+        db,
+        event_type=EventType.QUEUE_JOB_CANCELLED,
+        session_id=job.session_id,
+        agent_run_id=job.run_id,
+        severity="warning",
+        payload={
+            "queue_job_id": str(job.id),
+            "job_type": job.job_type,
+            "previous_status": previous_status,
+            "reason": reason,
+        },
+    )
+    return job
+
+
 async def _coerce_record(db: AsyncSession, job: QueueJob | QueueJobRecord) -> QueueJobRecord:
     if isinstance(job, QueueJobRecord):
         return job
@@ -636,6 +791,18 @@ async def _job_session(db: AsyncSession, job: QueueJobRecord, *, run: AgentRun |
 
 def _optional_uuid(value: Any) -> UUID | None:
     return UUID(str(value)) if value else None
+
+
+async def _list_jobs_raw(db: AsyncSession) -> list[QueueJobRecord]:
+    if hasattr(db, "objects"):
+        return [row for (model, _row_id), row in db.objects.items() if model is QueueJobRecord]
+    return list((await db.scalars(select(QueueJobRecord))).all())
+
+
+def _job_claim_is_stale(job: QueueJobRecord) -> bool:
+    if not job.claimed_at:
+        return True
+    return job.claimed_at <= datetime.now(UTC) - timedelta(seconds=get_settings().queue.visibility_timeout_seconds)
 
 
 runtime_queue = RuntimeQueue()

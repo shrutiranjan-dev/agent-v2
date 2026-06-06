@@ -17,6 +17,7 @@ from backend.app.db.models import (
     SessionSummary,
     SystemEvent,
     ToolCall,
+    WorkerHeartbeat,
 )
 
 
@@ -50,3 +51,5 @@ def test_runtime_spine_tables_and_columns_are_mapped() -> None:
     assert QueueJobRecord.__table__.c.idempotency_key.unique or any(
         constraint.name == "uq_queue_jobs_idempotency_key" for constraint in QueueJobRecord.__table__.constraints
     )
+    assert WorkerHeartbeat.__table__.c.last_heartbeat_at is not None
+    assert WorkerHeartbeat.__table__.c.current_queue_job_id.foreign_keys

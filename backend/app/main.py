@@ -15,6 +15,8 @@ from backend.app.api.routes_messages import router as messages_router
 from backend.app.api.routes_models import router as models_router
 from backend.app.api.routes_permissions import router as permissions_router
 from backend.app.api.routes_plugins import router as plugins_router
+from backend.app.api.routes_queue import router as queue_router
+from backend.app.api.routes_queue import workers_router
 from backend.app.api.routes_sessions import router as sessions_router
 from backend.app.api.routes_system_events import router as system_events_router
 from backend.app.api.routes_tools import router as tools_router
@@ -53,6 +55,8 @@ def create_app() -> FastAPI:
     app.include_router(sessions_router)
     app.include_router(messages_router)
     app.include_router(permissions_router)
+    app.include_router(queue_router)
+    app.include_router(workers_router)
     app.include_router(human_input_router)
     app.include_router(memory_router)
     app.include_router(codeintel_router)

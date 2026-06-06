@@ -14,6 +14,7 @@ import {
   Plug,
   Play,
   RefreshCw,
+  Rows3,
   Send,
   Server,
   ShieldQuestion,
@@ -33,6 +34,8 @@ import {
   Permission,
   Plugin,
   PluginTool,
+  QueueJob,
+  QueueWorker,
   SessionDetail,
   SystemEvent
 } from "../api/client";
@@ -45,7 +48,7 @@ import { StatusPill } from "../components/StatusPill";
 import { ToolCallTimeline } from "../components/ToolCallTimeline";
 import { usePolling } from "../stores/usePolling";
 
-type Tab = "chat" | "sessions" | "agents" | "tools" | "permissions" | "models" | "code" | "extensions" | "artifacts" | "events";
+type Tab = "chat" | "sessions" | "agents" | "tools" | "permissions" | "runtime" | "models" | "code" | "extensions" | "artifacts" | "events";
 
 const tabs: Array<{ id: Tab; label: string; icon: typeof Activity }> = [
   { id: "chat", label: "Chat", icon: MessageCircle },
@@ -53,6 +56,7 @@ const tabs: Array<{ id: Tab; label: string; icon: typeof Activity }> = [
   { id: "agents", label: "Agents", icon: Bot },
   { id: "tools", label: "Tools", icon: Wrench },
   { id: "permissions", label: "Permissions", icon: ShieldQuestion },
+  { id: "runtime", label: "Runtime", icon: Rows3 },
   { id: "models", label: "Ollama", icon: Server },
   { id: "code", label: "Code", icon: FileCode2 },
   { id: "extensions", label: "Extensions", icon: Plug },
@@ -73,6 +77,7 @@ export function Dashboard() {
   const [chatError, setChatError] = useState<string | undefined>();
   const [busyPermissionIds, setBusyPermissionIds] = useState<Record<string, "approve" | "deny">>({});
   const [busyHumanInputIds, setBusyHumanInputIds] = useState<Record<string, "answer" | "cancel">>({});
+  const [busyQueueJobIds, setBusyQueueJobIds] = useState<Record<string, "retry" | "cancel">>({});
   const [codeQuery, setCodeQuery] = useState("");
   const [codeIndexing, setCodeIndexing] = useState(false);
   const [codeError, setCodeError] = useState<string | undefined>();
@@ -86,6 +91,9 @@ export function Dashboard() {
   const models = usePolling(api.models, 15000);
   const artifacts = usePolling(api.artifacts, 15000);
   const events = usePolling(api.events, 5000);
+  const queueStats = usePolling(api.queueStats, 5000);
+  const queueJobs = usePolling(api.queueJobs, 5000);
+  const queueWorkers = usePolling(api.queueWorkers, 5000);
   const codeHealth = usePolling(api.codeIntelHealth, 15000);
   const codeMap = usePolling(api.codeMap, 15000);
   const codeSymbols = usePolling(() => api.codeSymbols(codeQuery || undefined), 8000);
@@ -166,6 +174,15 @@ export function Dashboard() {
   const selectedHumanInputs = (humanInputs.data?.requests ?? [])
     .filter((request) => request.session_id === selectedSessionId && request.status === "pending");
   const selectedSummaries = sessionDetail?.summaries ?? [];
+  const runtimeQueueEvents = useMemo(() => {
+    const merged = mergeEvents([...(events.data?.events ?? []), ...liveEvents]);
+    return merged
+      .filter((event) => {
+        const type = event.event_type ?? event.type;
+        return type.startsWith("queue_job.") || type.startsWith("worker.");
+      })
+      .slice(0, 20);
+  }, [events.data?.events, liveEvents]);
 
   async function createSession() {
     const created = await api.createSession({ title: `Session ${new Date().toLocaleTimeString()}`, agent_id: "build" });
@@ -317,6 +334,48 @@ export function Dashboard() {
     await humanInputs.refresh();
     await sessions.refresh();
     if (status === "failed") setChatPending(false);
+  }
+
+  async function retryQueueJob(jobId: string) {
+    if (busyQueueJobIds[jobId]) return;
+    if (!window.confirm("Retry this queue job?")) return;
+    setBusyQueueJobIds((items) => ({ ...items, [jobId]: "retry" }));
+    try {
+      await api.retryQueueJob(jobId, "dashboard_retry");
+      await queueJobs.refresh();
+      await queueStats.refresh();
+      await queueWorkers.refresh();
+      await events.refresh();
+    } catch (err) {
+      setChatError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusyQueueJobIds((items) => {
+        const next = { ...items };
+        delete next[jobId];
+        return next;
+      });
+    }
+  }
+
+  async function cancelQueueJob(jobId: string) {
+    if (busyQueueJobIds[jobId]) return;
+    if (!window.confirm("Cancel this queue job?")) return;
+    setBusyQueueJobIds((items) => ({ ...items, [jobId]: "cancel" }));
+    try {
+      await api.cancelQueueJob(jobId, "dashboard_cancel");
+      await queueJobs.refresh();
+      await queueStats.refresh();
+      await queueWorkers.refresh();
+      await events.refresh();
+    } catch (err) {
+      setChatError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusyQueueJobIds((items) => {
+        const next = { ...items };
+        delete next[jobId];
+        return next;
+      });
+    }
   }
 
   return (
@@ -615,6 +674,125 @@ export function Dashboard() {
           </section>
         )}
 
+        {active === "runtime" && (
+          <section className="runtime-panel">
+            <div className="runtime-hero">
+              <div>
+                <span className="eyebrow">Queue and worker control plane</span>
+                <h2>Runtime observability</h2>
+                <p>
+                  Queue {queueStats.data?.queue_enabled ? "enabled" : "disabled"} with {queueWorkers.data?.workers.length ?? 0} workers reporting.
+                </p>
+              </div>
+              <div className="code-actions">
+                <StatusPill value={queueStats.data?.queue_enabled ? "ok" : "disabled"} />
+              </div>
+            </div>
+            {(queueStats.error || queueJobs.error || queueWorkers.error) && (
+              <div className="inline-error">
+                <AlertTriangle size={16} />
+                <span>{queueStats.error ?? queueJobs.error ?? queueWorkers.error}</span>
+              </div>
+            )}
+            <div className="code-metrics">
+              <Metric label="Queued" value={String(queueStats.data?.stats.queued ?? 0)} />
+              <Metric label="Running" value={String(queueStats.data?.stats.running ?? 0)} />
+              <Metric label="Failed" value={String(queueStats.data?.stats.failed ?? 0)} />
+              <Metric label="Dead letter" value={String(queueStats.data?.stats.dead_letter ?? 0)} />
+            </div>
+            <div className="runtime-grid">
+              <section>
+                <div className="panel-head">
+                  <h2>Workers</h2>
+                  <span className="muted-copy">
+                    Oldest queued age {formatAge(queueStats.data?.stats.oldest_queued_age_seconds)}
+                  </span>
+                </div>
+                <div className="runtime-workers">
+                  {(queueWorkers.data?.workers ?? []).map((worker: QueueWorker) => (
+                    <article className="worker-card" key={worker.id}>
+                      <div className="worker-card-head">
+                        <div>
+                          <strong>{worker.worker_id}</strong>
+                          <span>{worker.hostname ?? "unknown host"} / pid {worker.process_id ?? "n/a"}</span>
+                        </div>
+                        <StatusPill value={worker.stale ? "stale" : worker.status} />
+                      </div>
+                      <dl>
+                        <div>
+                          <dt>Current job</dt>
+                          <dd>{worker.current_queue_job_id ?? "idle"}</dd>
+                        </div>
+                        <div>
+                          <dt>Heartbeat</dt>
+                          <dd>{formatAge(worker.last_heartbeat_age_seconds)} ago</dd>
+                        </div>
+                        <div>
+                          <dt>Completed</dt>
+                          <dd>{worker.completed_jobs_count}</dd>
+                        </div>
+                        <div>
+                          <dt>Failed</dt>
+                          <dd>{worker.failed_jobs_count}</dd>
+                        </div>
+                      </dl>
+                    </article>
+                  ))}
+                  {!queueWorkers.data?.workers.length && <p className="muted-copy">No workers have published heartbeats yet.</p>}
+                </div>
+              </section>
+              <section>
+                <div className="panel-head">
+                  <h2>Queue events</h2>
+                </div>
+                <EventStream events={runtimeQueueEvents} />
+              </section>
+            </div>
+            <section className="runtime-jobs">
+              <div className="panel-head">
+                <h2>Recent jobs</h2>
+                <span className="muted-copy">{queueStats.data?.stats.total ?? 0} total rows</span>
+              </div>
+              <div className="job-table">
+                {(queueJobs.data?.jobs ?? []).map((job: QueueJob) => (
+                  <article className="job-row" key={job.id}>
+                    <div className="job-summary">
+                      <strong>{job.job_type}</strong>
+                      <span>{job.queue_job_id}</span>
+                    </div>
+                    <div className="job-meta">
+                      <StatusPill value={job.status} />
+                      <span>attempt {job.attempt_count}/{job.max_attempts}</span>
+                      <span>{job.claimed_by ? `claimed by ${job.claimed_by}` : `priority ${job.priority}`}</span>
+                    </div>
+                    <div className="job-notes">
+                      <span>{job.session_id ? `session ${job.session_id}` : "no session"}</span>
+                      <span>{job.last_error ?? `available ${new Date(job.available_at).toLocaleString()}`}</span>
+                    </div>
+                    <footer>
+                      <button
+                        type="button"
+                        disabled={!queueJobCanRetry(job) || Boolean(busyQueueJobIds[job.id])}
+                        onClick={() => retryQueueJob(job.id)}
+                      >
+                        Retry
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!queueJobCanCancel(job) || Boolean(busyQueueJobIds[job.id])}
+                        onClick={() => cancelQueueJob(job.id)}
+                      >
+                        Cancel
+                      </button>
+                    </footer>
+                  </article>
+                ))}
+                {!queueJobs.data?.jobs.length && <p className="muted-copy">No queue jobs recorded yet.</p>}
+              </div>
+            </section>
+          </section>
+        )}
+
         {active === "models" && (
           <Grid items={(models.data?.models ?? []).map((model) => ({
             title: String(model.name ?? model.model ?? "model"),
@@ -858,4 +1036,20 @@ function Metric(props: { label: string; value: string }) {
       <strong>{props.value}</strong>
     </article>
   );
+}
+
+function queueJobCanRetry(job: QueueJob) {
+  return ["failed", "dead_letter", "cancelled"].includes(job.status);
+}
+
+function queueJobCanCancel(job: QueueJob) {
+  return ["queued", "claimed"].includes(job.status);
+}
+
+function formatAge(seconds?: number | null) {
+  if (seconds == null) return "n/a";
+  if (seconds < 1) return "<1s";
+  if (seconds < 60) return `${Math.round(seconds)}s`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
+  return `${Math.round(seconds / 3600)}h`;
 }

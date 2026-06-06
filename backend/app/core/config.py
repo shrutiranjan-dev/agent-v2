@@ -36,6 +36,8 @@ class QueueConfig(BaseModel):
     retry_backoff_seconds: float = Field(default=1.0, ge=0)
     visibility_timeout_seconds: int = Field(default=300, ge=1)
     worker_id: str | None = None
+    worker_heartbeat_interval_seconds: int = Field(default=10, ge=1)
+    worker_stale_after_seconds: int = Field(default=60, ge=1)
 
 
 class QdrantConfig(BaseModel):
@@ -212,6 +214,20 @@ class Settings(BaseSettings):
     )
     queue_worker_id_override: str | None = Field(
         default=None, validation_alias=AliasChoices("AP_QUEUE_WORKER_ID", "QUEUE_WORKER_ID")
+    )
+    queue_worker_heartbeat_interval_seconds_override: int | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "AP_WORKER_HEARTBEAT_INTERVAL_SECONDS",
+            "WORKER_HEARTBEAT_INTERVAL_SECONDS",
+        ),
+    )
+    queue_worker_stale_after_seconds_override: int | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "AP_WORKER_STALE_AFTER_SECONDS",
+            "WORKER_STALE_AFTER_SECONDS",
+        ),
     )
     qdrant_url_override: str | None = Field(default=None, validation_alias=AliasChoices("AP_QDRANT_URL", "QDRANT_URL"))
     qdrant_enabled_override: bool | None = Field(
@@ -465,6 +481,10 @@ class Settings(BaseSettings):
             self.queue.visibility_timeout_seconds = self.queue_visibility_timeout_seconds_override
         if self.queue_worker_id_override:
             self.queue.worker_id = self.queue_worker_id_override
+        if self.queue_worker_heartbeat_interval_seconds_override is not None:
+            self.queue.worker_heartbeat_interval_seconds = self.queue_worker_heartbeat_interval_seconds_override
+        if self.queue_worker_stale_after_seconds_override is not None:
+            self.queue.worker_stale_after_seconds = self.queue_worker_stale_after_seconds_override
         if self.qdrant_url_override:
             self.qdrant.url = self.qdrant_url_override
         if self.qdrant_enabled_override is not None:

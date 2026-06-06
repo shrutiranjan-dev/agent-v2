@@ -83,19 +83,21 @@ npm install
 npm run build
 ```
 
-Optional smoke checks from PowerShell can run through Git Bash or WSL. If you run them from a shell that supports Bash, set the Docker PostgreSQL URL first:
+Optional smoke checks from PowerShell can run through native `.ps1` scripts where available. Set the Docker PostgreSQL URL first:
 
 ```powershell
 $env:AP_TEST_POSTGRES_URL="postgresql+psycopg://agent:agent@localhost:15432/agent_platform"
+powershell -ExecutionPolicy Bypass -File scripts\queue-worker-smoke.ps1
 ```
 
-Then use Git Bash or WSL:
+Other smoke checks still run through Git Bash or WSL:
 
 ```bash
 scripts/runtime-smoke.sh
 scripts/codeintel-smoke.sh
 scripts/lsp-smoke.sh
 scripts/real-mcp-smoke.sh
+scripts/queue-worker-smoke.sh
 ```
 
 Windows notes:

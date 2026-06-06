@@ -1195,3 +1195,28 @@
 - Batch 1 still uses one LSP process at a time rather than a pooled or per-workspace supervisor.
 - There is no HTTP/SSE LSP transport in this batch; the implementation is stdio-only.
 - Live real-LSP smoke depends on starting the backend with `AP_LSP_ENABLED=true` and a valid `AP_LSP_PYTHON_COMMAND` such as `pylsp`.
+
+# Queue Worker Dashboard and Runtime Observability Batch 1 Implementation Result
+
+## Backend runtime status
+
+- Added durable `worker_heartbeats` persistence and migration `202606050009_queue_worker_observability.py`.
+- The queue worker now publishes lifecycle and failure events, writes periodic heartbeats, and records current job/run plus completed and failed counters.
+- Added queue operator endpoints for `GET /queue/stats`, `GET /queue/jobs`, `GET /queue/jobs/{id}`, `POST /queue/jobs/{id}/retry`, `POST /queue/jobs/{id}/cancel`, and `GET /queue/workers`.
+
+## Dashboard status
+
+- Added a `Runtime` dashboard section with queue metrics, worker heartbeat cards, recent jobs, operator retry/cancel controls, and queue/worker event summaries.
+- Event rendering now summarizes queue and worker payloads instead of forcing operators to read raw JSON first.
+- Added `.env.example` defaults for `AP_WORKER_HEARTBEAT_INTERVAL_SECONDS` and `AP_WORKER_STALE_AFTER_SECONDS`.
+
+## Validation status
+
+- Added focused backend tests for worker heartbeat serialization, queue stats, and queue observability routes.
+- Added `scripts/queue-worker-smoke.sh` to seed durable queue rows, exercise retry/cancel endpoints, validate `/queue/stats`, `/queue/jobs`, and `/queue/workers`, and clean up the smoke rows.
+
+## Remaining gaps
+
+- The dashboard currently supports retry and pre-run cancellation only; safe cancellation of actively running work remains intentionally blocked.
+- The runtime view is polling-based and does not yet have a dedicated queue/worker websocket stream.
+- Worker heartbeat history is not retained yet; Batch 1 stores the latest state per worker for operator visibility.

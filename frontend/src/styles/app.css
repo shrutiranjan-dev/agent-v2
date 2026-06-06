@@ -217,7 +217,9 @@ h3 {
 .status-error,
 .status-blocked,
 .status-denied,
-.status-cancelled {
+.status-cancelled,
+.status-stale,
+.status-disabled {
   color: var(--danger);
   border-color: rgba(184, 59, 47, 0.35);
 }
@@ -922,6 +924,12 @@ h3 {
   font-size: 13px;
 }
 
+.event-summary {
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
 code {
   display: inline-block;
   max-width: 100%;
@@ -955,6 +963,136 @@ em {
 .extensions-panel {
   display: grid;
   gap: 14px;
+}
+
+.runtime-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.runtime-hero,
+.runtime-grid section,
+.runtime-jobs {
+  background: rgba(255, 253, 248, 0.88);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+
+.runtime-hero,
+.runtime-jobs,
+.runtime-grid section {
+  padding: 16px;
+}
+
+.runtime-hero {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 18px;
+}
+
+.runtime-hero p {
+  margin-top: 8px;
+  color: var(--muted);
+}
+
+.runtime-grid {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 12px;
+}
+
+.runtime-workers,
+.job-table {
+  display: grid;
+  gap: 10px;
+}
+
+.worker-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fffefb;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.worker-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.worker-card-head div,
+.worker-card dl,
+.job-row,
+.job-summary,
+.job-meta,
+.job-notes {
+  min-width: 0;
+}
+
+.worker-card-head div {
+  display: grid;
+  gap: 4px;
+}
+
+.worker-card-head span,
+.worker-card dt,
+.job-row span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.worker-card dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.worker-card dl div {
+  display: grid;
+  gap: 4px;
+}
+
+.worker-card dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.job-row {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fffefb;
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.job-summary,
+.job-meta,
+.job-notes,
+.job-row footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.job-summary strong {
+  color: var(--ink);
+}
+
+.job-summary span,
+.job-notes span {
+  overflow-wrap: anywhere;
+}
+
+.job-row footer {
+  justify-content: flex-end;
 }
 
 .code-hero,
@@ -1155,7 +1293,8 @@ em {
   .split-view,
   .chat-shell,
   .code-grid,
-  .code-metrics {
+  .code-metrics,
+  .runtime-grid {
     grid-template-columns: 1fr;
   }
 
@@ -1188,5 +1327,9 @@ em {
 
   .chat-message {
     max-width: 100%;
+  }
+
+  .worker-card dl {
+    grid-template-columns: 1fr;
   }
 }
