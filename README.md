@@ -176,7 +176,7 @@ AP_LSP_ENABLED=true AP_LSP_PYTHON_COMMAND=pylsp \
   powershell -ExecutionPolicy Bypass -File scripts/lsp-smoke.ps1 -Real
 ```
 
-CI now includes a dedicated mandatory `real-python-lsp-smoke` job that installs `python-lsp-server`, starts the backend with `AP_LSP_ENABLED=true`, runs `scripts/lsp-smoke.sh --real`, and only passes when the smoke prints `REAL_LSP=passed`. That path is now marked `REAL_LSP_CI_VALIDATED`.
+CI now includes a dedicated mandatory `real-python-lsp-smoke` job that installs `python-lsp-server`, starts the backend with `AP_LSP_ENABLED=true`, runs `scripts/lsp-smoke.sh --real`, and only passes when the smoke prints `REAL_LSP=passed`. The repository now also ships `scripts/check-github-actions.ps1` and `scripts/mark-ci-validated.ps1` so docs only move from `REAL_LSP_CI_JOB_ADDED_PENDING_REMOTE_VALIDATION` to `REAL_LSP_CI_VALIDATED` after GitHub Actions is independently proven green. The current documented status remains `REAL_LSP_CI_JOB_ADDED_PENDING_REMOTE_VALIDATION` because the verifier could not prove a green `CI` workflow for commits `2564c64` or `ed13d13`.
 
 ## Developer Commands
 

@@ -8,6 +8,24 @@ Default GitHub Actions require no repository secrets, no cloud model provider, a
 - `Repo Hygiene` runs on pull requests and pushes to `main`. It blocks committed `.env` files, private keys, runtime folders, ignored artifact source packages, invalid flow parity JSON (matrix + verified variants), shell syntax errors, CRLF in shell scripts, PowerShell parse errors, missing `pyproject.toml`, and broken line-ending policy.
 - `Manual Smoke` runs only through `workflow_dispatch`. It builds the Docker Compose stack and runs the heavier smoke suite against live containers.
 
+## Repo-Local CI Verification
+
+Use the repo-local verifier before changing docs from `REAL_LSP_CI_JOB_ADDED_PENDING_REMOTE_VALIDATION` to `REAL_LSP_CI_VALIDATED`.
+
+PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\check-github-actions.ps1 -Owner shrutiranjan-dev -Repo agent-v2 -Sha (git rev-parse HEAD) -RequireWorkflows "CI","Repo Hygiene"
+```
+
+Guarded doc update:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\mark-ci-validated.ps1
+```
+
+The guard refuses to edit docs unless all required workflows conclude `success`.
+
 ## Default CI Design
 
 The fast CI path starts a real `pgvector/pgvector:pg16` Postgres service for migration and API smoke validation. It starts the FastAPI backend directly on the runner with CI-safe environment values:

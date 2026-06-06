@@ -1036,8 +1036,8 @@
 - Current improvement: `scripts/lsp-smoke.sh` and `scripts/lsp-smoke.ps1` now accept `--real` / `-Real`; default mode prints `REAL_LSP=disabled_static_fallback`; real mode prints `REAL_LSP=passed` only after `python -c "import pylsp"` succeeds AND at least one `/code/symbols` (or `/code/definition` / `/code/diagnostics`) response body carries `source: real_lsp`. `--skip-real-if-missing` / `-SkipRealIfMissing` prints `REAL_LSP=skipped_pylsp_missing` and exits 0 when pylsp is absent. The smoke never fakes a pass.
 - Why it matters: deployment validation has a dedicated code path for real-LSP lifecycle checks and is provably honest about whether real LSP actually handled a request.
 - Exact files: `scripts/lsp-smoke.sh`, `scripts/lsp-smoke.ps1`, `scripts/codeintel-smoke.sh`, `pyproject.toml` (`[project.optional-dependencies] codeintel`).
-- Exact recommended next fix: keep the now-validated `real-python-lsp-smoke` job green while expanding beyond Python to TypeScript/JS LSP and broader language-server coverage.
-- Risk if ignored: the Python `pylsp` path is now release-proven, but other language-server paths can still drift without equivalent CI coverage.
+- Exact recommended next fix: get the `CI` workflow green for the commits being used as release evidence, then use `scripts/mark-ci-validated.ps1` to update docs only after the verifier proves success. After that, expand beyond Python to TypeScript/JS LSP and broader language-server coverage.
+- Risk if ignored: the Python `pylsp` path is locally validated and the workflow exists, but the release docs can drift away from GitHub-hosted reality if the verifier is not used and the failing CI workflow remains unresolved.
 
 ## Queue and worker dashboard
 
