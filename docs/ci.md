@@ -2,6 +2,46 @@
 
 Default GitHub Actions require no repository secrets, no cloud model provider, and no local Ollama model.
 
+## Local Source Of Truth vs CI Compatibility Gate
+
+This repository has two complementary validation lanes, and they are not
+the same thing:
+
+- **Local source of truth: Windows PowerShell.** The primary local shell is
+  Windows PowerShell 5.1+. `scripts/validate-local.ps1` is the canonical
+  "is local validation green?" command on a developer workstation, and the
+  PowerShell smokes (`cli-tui-smoke.ps1`, `codeintel-smoke.ps1`,
+  `db-migration-smoke.ps1`, `lsp-smoke.ps1`, `observability-smoke.ps1`,
+  `queue-worker-smoke.ps1`) are the canonical local smoke surface. The
+  Windows-first policy is documented in
+  [`docs/windows-shell-policy.md`](windows-shell-policy.md) and the Codex
+  terminal conventions are in
+  [`docs/codex-windows-execution.md`](codex-windows-execution.md).
+- **CI compatibility gate: GitHub Actions on `ubuntu-latest`.** The Linux
+  pipeline exists to prove the project still builds, tests, lints, migrates,
+  and runs the real `pylsp` smoke on a clean Ubuntu runner. It is a
+  compatibility check, not the primary development loop. Workflows must
+  not be removed even if local Windows validation is already green; the CI
+  gate is what protects the repo from regressions that only show up on a
+  fresh Linux container.
+
+The two lanes are intentionally separate:
+
+- A green local `validate-local.ps1 -WithSmokes` run does **not** flip
+  parity status to `REAL_LSP_CI_VALIDATED`; that label requires the
+  `check-github-actions.ps1` verifier to confirm that the `CI` and
+  `Repo Hygiene` workflows both concluded `success` on the public GitHub
+  Actions API. See `scripts/mark-ci-validated.ps1` for the guarded doc
+  update.
+- A green CI run does **not** replace local validation. CI is a clean-room
+  compatibility gate; local Windows is where product decisions are made.
+- A Bash-only smoke (`mcp-plugin-smoke.sh`, `real-mcp-smoke.sh`,
+  `permission-resume-smoke.sh`) that requires Git Bash, WSL, or system
+  Bash must not be a hard CI dependency for a Windows-first primary
+  validation pass. The PowerShell wrappers print "Bash optional" and exit
+  `0` on the skip path; `validate-local.ps1 -WithSmokes` classifies those
+  as `skipped`, not `failed`, so the overall pass count stays truthful.
+
 ## Workflows
 
 - `CI` runs on pull requests and pushes to `main`. It validates backend compile, Ruff, backend tests, frontend build, Docker Compose config, migrations against real pgvector Postgres, deterministic API smokes, a dedicated real Python LSP smoke against a live backend, and a dedicated CLI/TUI headless smoke.
@@ -62,6 +102,17 @@ It:
 7. Uploads the smoke log, backend log, and response dumps from `/tmp/lsp-smoke/` on failure with 7 day retention.
 
 This job is the CI proof for the already validated real Python LSP path. It does not require Ollama generation and does not pass if the runtime falls back to `static_fallback`.
+
+The real Python LSP path is also valid on local Windows: running
+`scripts/lsp-smoke.ps1 -Real` against a locally running backend with
+`AP_LSP_ENABLED=true AP_LSP_PYTHON_COMMAND=pylsp` produces the same
+`REAL_LSP=passed` gate locally. Local Windows validation is sufficient to
+label the path `REAL_LSP_VALIDATED` in this repo's parity docs. The
+`REAL_LSP_CI_VALIDATED` label is a **stricter** claim that additionally
+requires the `check-github-actions.ps1` verifier to confirm a green `CI`
+workflow on the public GitHub Actions API; it remains a separate gate
+because the CI is a clean-room compatibility check, not a substitute for
+local Windows validation.
 
 ## CLI/TUI CI Job
 

@@ -35,7 +35,7 @@ function Resolve-Bash {
 
 $bash = Resolve-Bash
 if (-not $bash) {
-    Write-SmokeLog "SKIP: real-mcp smoke requires Git Bash, WSL, or a Bash-on-Windows shell. Install Git for Windows or run from WSL."
+    Write-SmokeLog "SKIP: real-mcp smoke requires Git Bash, WSL, or a Bash-on-Windows shell. Bash optional on Windows; primary local workflow is PowerShell. Install Git for Windows or run from WSL to enable this smoke."
     exit 0
 }
 

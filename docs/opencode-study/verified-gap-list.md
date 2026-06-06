@@ -3,6 +3,33 @@
 Audit commit: `8d63be8`
 Verified overall parity: 72% (Code Intelligence and LSP raised to 86% with both fake-LSP path validation AND live real-pylsp 1.14.0 validation in this audit; status is now `REAL_LSP_VALIDATED` for the Python LSP path)
 Latest batch: `P0 CI + CLI/TUI release hardening` (DONE; see implementation-roadmap.md and the latest commit for the resolution).
+Latest local policy: `Make Windows PowerShell the primary local workflow` (DONE; see [`docs/windows-shell-policy.md`](../windows-shell-policy.md) and [`docs/codex-windows-execution.md`](../codex-windows-execution.md) for the project-wide rule, and the `validate-local.ps1` summary in this audit for the new passed/failed/skipped reporting).
+
+## Validation Lanes
+
+- **Local source of truth: Windows PowerShell.** The primary local shell
+  is Windows PowerShell 5.1+. `scripts/validate-local.ps1` is the canonical
+  "is local validation green?" command on a developer workstation, with
+  `-WithDocker` for compose service checks and `-WithSmokes` for the full
+  PowerShell smoke surface. The new passed/failed/skipped summary prints
+  at the end of every run; the script only exits non-zero on a real
+  required failure, never on a `skip`.
+- **CI compatibility gate: GitHub Actions on `ubuntu-latest`.** The Linux
+  pipeline proves the project still builds, tests, lints, migrates, and
+  runs the real `pylsp` smoke on a clean Ubuntu runner. It is a
+  compatibility check, not a substitute for local Windows validation.
+- **Bash-only smokes are explicitly "Bash optional" on Windows.** The
+  PowerShell wrappers for `mcp-plugin-smoke`, `real-mcp-smoke`, and
+  `permission-resume-smoke` print a "Bash optional" notice and exit `0`
+  on the skip path. `validate-local.ps1 -WithSmokes` classifies those as
+  `skipped` (not `failed`) so the overall pass count stays truthful on a
+  clean Windows install without Git Bash.
+- **`REAL_LSP_CI_VALIDATED` is a stricter claim than
+  `REAL_LSP_VALIDATED`.** Local Windows validation is sufficient for
+  `REAL_LSP_VALIDATED`. The CI-validated label additionally requires the
+  `check-github-actions.ps1` verifier to confirm a green `CI` workflow on
+  the public GitHub Actions API; that gate is still pending in this
+  audit and must not be flipped without proof.
 
 ## P0 Release Blockers
 

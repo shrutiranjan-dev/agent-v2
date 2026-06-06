@@ -16,7 +16,59 @@ This project is not affiliated with OpenCode and does not reuse OpenCode brandin
 - React, TypeScript, Vite
 - WebSocket session event streaming
 
-## Quick Start
+## Quick Start (Windows PowerShell — Primary)
+
+Windows PowerShell is the primary local shell for this repository. The eight
+commands below bring the stack up, run migrations, install local Ollama
+models, and execute the one-command local validator. See
+[`docs/windows-shell-policy.md`](docs/windows-shell-policy.md) for the
+project-wide rule and [`docs/codex-windows-execution.md`](docs/codex-windows-execution.md)
+for the Codex terminal execution conventions.
+
+```powershell
+# 1. Clone and configure
+git clone git@github.com:shrutiranjan-dev/agent-v2.git
+cd agent-v2
+Copy-Item .env.example .env
+
+# 2. Start the Docker stack (postgres, redis, qdrant, neo4j, minio, clickhouse, backend, backend-worker, frontend)
+docker compose up -d --build
+
+# 3. Apply migrations against the live Postgres
+docker compose run --rm backend alembic -c backend/alembic.ini upgrade head
+
+# 4. Pull the local Ollama models the runtime uses
+ollama pull qwen2.5-coder:7b
+ollama pull qwen2.5-coder:14b
+ollama pull llama3.1:8b
+
+# 5. Create the local Python venv and install backend + test deps
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -e ".[test]"
+
+# 6. Run the local backend checks
+.\.venv\Scripts\python -m compileall backend\app
+.\.venv\Scripts\python -m ruff check backend\app backend\tests
+.\.venv\Scripts\python -m pytest backend\tests
+
+# 7. Build the frontend dashboard
+npm.cmd run build --prefix frontend
+
+# 8. Run the one-command local validator (add -WithDocker and -WithSmokes as needed)
+powershell -ExecutionPolicy Bypass -File scripts\validate-local.ps1
+```
+
+Backend: <http://localhost:8000>
+
+Frontend: <http://localhost:5173>
+
+## Quick Start (CI / Linux Helper)
+
+The same steps expressed as Bash, used by the GitHub Actions Ubuntu pipeline
+and as a convenience for Linux/macOS developers. Local Windows development
+should keep using the PowerShell flow above; the Bash flow is **not** the
+primary path.
 
 ```bash
 cp .env.example .env
@@ -24,10 +76,6 @@ docker compose up -d --build
 scripts/migrate.sh
 scripts/pull-ollama-models.sh
 ```
-
-Backend: http://localhost:8000
-
-Frontend: http://localhost:5173
 
 ## Windows Setup
 
@@ -111,9 +159,13 @@ bash scripts/validate-local.sh
 bash scripts/validate-local.sh --with-smokes
 ```
 
-Other smoke checks still run through Git Bash or WSL:
+Other smoke checks (CI / Linux helper; only run these when explicitly asked):
 
 ```bash
+# CI / Linux helper. The PowerShell wrappers for mcp-plugin-smoke, real-mcp-smoke,
+# and permission-resume-smoke delegate to these scripts only when Git Bash, WSL,
+# or system Bash is installed. On a clean Windows install without Bash, those
+# PowerShell wrappers print "Bash optional" and exit 0 (skipped, not failed).
 scripts/runtime-smoke.sh
 scripts/codeintel-smoke.sh
 scripts/lsp-smoke.sh
@@ -132,7 +184,7 @@ Windows notes:
 
 Static code indexing is always available when code intelligence is enabled. Real LSP is optional and intentionally honest about its state.
 
-Environment variables:
+Environment variables (defaults shown; override on Windows with `$env:AP_LSP_X = "value"` before `docker compose up -d --build backend`):
 
 ```bash
 AP_LSP_ENABLED=false
@@ -157,9 +209,18 @@ Every `/code/...` response and every `code.*` tool result now carries these hone
 - `fallback_reason`: human-readable reason when the response is from fallback (or `None` for real LSP)
 - `lsp`: full health snapshot including `real_lsp_enabled`, `command`, `started`, `started_at`, `request_count`, `failure_count`
 
-Smoke options:
+Smoke options (PowerShell is the primary form on Windows; Bash is the CI / Linux helper):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\codeintel-smoke.ps1
+powershell -ExecutionPolicy Bypass -File scripts\lsp-smoke.ps1            # static fallback smoke (default)
+powershell -ExecutionPolicy Bypass -File scripts\lsp-smoke.ps1 -Real      # require real pylsp + source: real_lsp
+powershell -ExecutionPolicy Bypass -File scripts\lsp-smoke.ps1 -Real -SkipRealIfMissing
+                                                                            # REAL_LSP=skipped_pylsp_missing if pylsp absent
+```
 
 ```bash
+# CI / Linux helper (same flags exposed as --real / --skip-real-if-missing / --strict-real-lsp)
 scripts/codeintel-smoke.sh
 scripts/lsp-smoke.sh                       # static fallback smoke (default)
 STRICT_REAL_LSP=1 scripts/lsp-smoke.sh    # require real pylsp + source: real_lsp
@@ -170,15 +231,28 @@ scripts/lsp-smoke.sh --real --skip-real-if-missing
 
 Real LSP requires `python-lsp-server`:
 
-```bash
+```powershell
 pip install -e ".[codeintel]"   # installs pylsp
-AP_LSP_ENABLED=true AP_LSP_PYTHON_COMMAND=pylsp \
-  powershell -ExecutionPolicy Bypass -File scripts/lsp-smoke.ps1 -Real
+$env:AP_LSP_ENABLED = "true"
+$env:AP_LSP_PYTHON_COMMAND = "pylsp"
+docker compose up -d --build backend
+powershell -ExecutionPolicy Bypass -File scripts\lsp-smoke.ps1 -Real
 ```
 
 CI now includes a dedicated mandatory `real-python-lsp-smoke` job that installs `python-lsp-server`, starts the backend with `AP_LSP_ENABLED=true`, runs `scripts/lsp-smoke.sh --real`, and only passes when the smoke prints `REAL_LSP=passed`. The repository now also ships `scripts/check-github-actions.ps1` and `scripts/mark-ci-validated.ps1` so docs only move from `REAL_LSP_CI_JOB_ADDED_PENDING_REMOTE_VALIDATION` to `REAL_LSP_CI_VALIDATED` after GitHub Actions is independently proven green. The current documented status remains `REAL_LSP_CI_JOB_ADDED_PENDING_REMOTE_VALIDATION` because the verifier could not prove a green `CI` workflow for commits `2564c64` or `ed13d13`.
 
 ## Developer Commands
+
+Primary PowerShell (Windows):
+
+```powershell
+# Bring the stack up, apply migrations, run the validator
+scripts\dev-up.ps1
+powershell -ExecutionPolicy Bypass -File scripts\db-migration-smoke.ps1
+powershell -ExecutionPolicy Bypass -File scripts\validate-local.ps1 -WithSmokes
+```
+
+CI / Linux helper (Bash mirror, not the primary path):
 
 ```bash
 scripts/dev-up.sh
@@ -186,7 +260,16 @@ scripts/migrate.sh
 scripts/smoke-test.sh
 ```
 
-Local Python checks:
+Local Python checks (PowerShell is the primary form on Windows):
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -e ".[test]"
+.\.venv\Scripts\python -m pytest backend\tests
+```
+
+CI / Linux helper:
 
 ```bash
 python3 -m venv .venv
@@ -195,7 +278,14 @@ pip install -e '.[test]'
 pytest
 ```
 
-Frontend checks:
+Frontend checks (PowerShell is the primary form on Windows):
+
+```powershell
+npm.cmd install --prefix frontend
+npm.cmd run build --prefix frontend
+```
+
+CI / Linux helper:
 
 ```bash
 cd frontend

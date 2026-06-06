@@ -33,6 +33,8 @@
     }
   },
   "local_validation": {
+    "primary_shell": "Windows PowerShell 5.1+ (scripts/validate-local.ps1 is the source of truth for local validation)",
+    "ci_compatibility_shell": "GitHub Actions on ubuntu-latest (workflows are a compatibility gate, not a substitute for local Windows validation)",
     "compile": "PASS",
     "ruff": "PASS",
     "pytest": "PASS: 196 passed, 4 skipped, 1 warning",
@@ -40,8 +42,8 @@
     "docker_compose_config": "PASS",
     "docker_backend_worker_boot": "PASS",
     "cli_tui_smoke": "PASS",
-    "bash_smokes": "NOT_RUN: local Bash/WSL unavailable",
-    "post_audit_validate_local": "PASS: compile, ruff, pytest, frontend build, docker compose config, cli-tui smoke all green; -WithSmokes runs observability-smoke.ps1 and queue-worker-smoke.ps1 against the live backend"
+    "bash_smokes": "NOT_RUN: local Bash/WSL unavailable; bash-delegating smokes (mcp-plugin-smoke, real-mcp-smoke, permission-resume-smoke) print 'Bash optional' and exit 0 on Windows without Bash; validate-local.ps1 -WithSmokes classifies them as skipped",
+    "post_audit_validate_local": "PASS: compile, ruff, pytest, frontend build, docker compose config, cli-tui smoke all green; -WithSmokes runs observability-smoke.ps1 and queue-worker-smoke.ps1 against the live backend; new passed/failed/skipped summary at the end of every run"
   },
   "categories": [
     {
