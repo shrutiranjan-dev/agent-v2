@@ -1,0 +1,258 @@
+{
+  "audit_date": "2026-06-06",
+  "audited_commit": "ddae1ec",
+  "reference_source": "external/opencode-source",
+  "verified_overall_percent": 70,
+  "claimed_overall_percent": 74,
+  "overall_status": "PARTIAL_WITH_CI_BLOCKER",
+  "ci_status": {
+    "repo_hygiene": "PASS",
+    "ci": "FAIL",
+    "ci_url": "https://github.com/shrutiranjan-dev/agent-v2/actions/runs/27064801133",
+    "failing_job": "Backend",
+    "failing_test": "backend/tests/test_cli_flow.py::test_cli_tui_help_lists_check_flag"
+  },
+  "local_validation": {
+    "compile": "PASS",
+    "ruff": "PASS",
+    "pytest": "PASS: 196 passed, 4 skipped, 1 warning",
+    "frontend_build": "PASS",
+    "docker_compose_config": "PASS",
+    "docker_backend_worker_boot": "PASS",
+    "cli_tui_smoke": "PASS",
+    "bash_smokes": "NOT_RUN: local Bash/WSL unavailable"
+  },
+  "categories": [
+    {
+      "id": "core_runtime",
+      "name": "Core runtime",
+      "claimed_percent": null,
+      "verified_percent": 84,
+      "status": "STRONG",
+      "confidence": "HIGH",
+      "evidence": [
+        "FastAPI backend starts locally on Windows",
+        "Compile, ruff, local backend pytest passed",
+        "Docker backend and worker booted",
+        "/health returned ok"
+      ],
+      "gaps": [
+        "Production tenancy/auth hardening not proven",
+        "Current main CI is red",
+        "Long-running recovery behavior not fully proven"
+      ]
+    },
+    {
+      "id": "cli_tui_flow",
+      "name": "CLI/TUI coding flow",
+      "claimed_percent": 86,
+      "verified_percent": 80,
+      "status": "STRONG_WITH_CI_BLOCKER",
+      "confidence": "HIGH",
+      "evidence": [
+        "Textual app implemented in backend/app/cli/tui_app.py",
+        "Event bridge implemented in backend/app/cli/tui_events.py",
+        "Reducer-style TUI state implemented in backend/app/cli/tui_state.py",
+        "Local scripts/cli-tui-smoke.ps1 passed"
+      ],
+      "gaps": [
+        "GitHub Ubuntu Backend job fails on TUI help flag assertion",
+        "Manual live TUI flow not fully proven",
+        "Replay/cursor/resize polish not fully proven"
+      ]
+    },
+    {
+      "id": "agent_system",
+      "name": "Agent system",
+      "claimed_percent": null,
+      "verified_percent": 72,
+      "status": "PARTIAL",
+      "confidence": "HIGH",
+      "evidence": [
+        "Agent registry includes build, plan, general, explore, summary, and compaction agents",
+        "Per-agent tool permissions and hidden summary/compaction agents are tested",
+        "Model selection requires JSON-capable protocol where needed"
+      ],
+      "gaps": [
+        "Subagent orchestration parity not proven",
+        "Rich agent routing/configuration UX missing",
+        "Lifecycle observability needs more polish"
+      ]
+    },
+    {
+      "id": "tool_system",
+      "name": "Tool system",
+      "claimed_percent": null,
+      "verified_percent": 84,
+      "status": "STRONG",
+      "confidence": "HIGH",
+      "evidence": [
+        "Read/write/edit/patch/grep/glob/bash/todo/question/codeintel tools exist",
+        "Tool executor applies permission policy and preview metadata",
+        "Tool registry, parity, bash safety, and codeintel tests passed"
+      ],
+      "gaps": [
+        "Full preview/diff parity for every mutation path not proven",
+        "OpenCode-level tool UX and retry history incomplete",
+        "Broader tool ecosystem parity not proven"
+      ]
+    },
+    {
+      "id": "permission_human_loop",
+      "name": "Permission and human-in-loop",
+      "claimed_percent": null,
+      "verified_percent": 86,
+      "status": "STRONG",
+      "confidence": "HIGH",
+      "evidence": [
+        "Permission approve/deny routes and queue-backed resume exist",
+        "Human input answer/cancel and queue resume exist",
+        "Secret path, external path, duplicate, and resume tests passed"
+      ],
+      "gaps": [
+        "Persisted always/deny policy UI not proven",
+        "Human-input smoke skipped by design with test endpoints disabled",
+        "More end-to-end terminal/web UX proof needed"
+      ]
+    },
+    {
+      "id": "memory_compaction",
+      "name": "Memory and compaction",
+      "claimed_percent": null,
+      "verified_percent": 70,
+      "status": "PARTIAL",
+      "confidence": "HIGH",
+      "evidence": [
+        "Summary, memory, compaction, context builder, pgvector, and Qdrant code exist",
+        "Memory compaction tests passed locally",
+        "Context integration is implemented"
+      ],
+      "gaps": [
+        "Qdrant memory store disabled in live health",
+        "Embeddings not proven active",
+        "Memory compaction smoke not run locally because Bash was unavailable"
+      ]
+    },
+    {
+      "id": "codeintel_lsp",
+      "name": "Code intelligence and LSP",
+      "claimed_percent": null,
+      "verified_percent": 76,
+      "status": "PARTIAL",
+      "confidence": "HIGH",
+      "evidence": [
+        "Static indexing, parser, diagnostics, LSP client, routes, and tool exist",
+        "Codeintel tests passed",
+        "/health/codeintel returned ok"
+      ],
+      "gaps": [
+        "Live runtime used static_fallback",
+        "real_lsp_enabled=false during audit",
+        "TypeScript/JS LSP parity not proven"
+      ]
+    },
+    {
+      "id": "mcp_plugin",
+      "name": "MCP and plugin system",
+      "claimed_percent": null,
+      "verified_percent": 72,
+      "status": "PARTIAL",
+      "confidence": "HIGH",
+      "evidence": [
+        "Real stdio MCP support is implemented",
+        "MCP health reported SDK available and enabled",
+        "Plugin manifest loading and MCP tests passed"
+      ],
+      "gaps": [
+        "HTTP/SSE transports disabled",
+        "OAuth/auth not implemented",
+        "Plugin execution is manifest-only"
+      ]
+    },
+    {
+      "id": "web_ui_flow",
+      "name": "Web UI product flow",
+      "claimed_percent": null,
+      "verified_percent": 70,
+      "status": "PARTIAL",
+      "confidence": "MEDIUM",
+      "evidence": [
+        "Frontend build passed",
+        "Dashboard surfaces sessions, events, permissions, human input, queue, artifacts, memory, code, MCP, and plugins"
+      ],
+      "gaps": [
+        "No frontend unit/e2e tests were run in this audit",
+        "OpenCode-level UX polish not proven",
+        "Accessibility and keyboard behavior not proven"
+      ]
+    },
+    {
+      "id": "github_workflow",
+      "name": "GitHub bot/workflow flow",
+      "claimed_percent": null,
+      "verified_percent": 18,
+      "status": "WEAK",
+      "confidence": "HIGH",
+      "evidence": [
+        "GitHub Actions workflows exist"
+      ],
+      "gaps": [
+        "Webhook/comment command flow not proven",
+        "Signature validation not proven",
+        "Issue/PR session lifecycle, plan posting, commit branch automation, and PR creation flow missing or not proven"
+      ]
+    },
+    {
+      "id": "provider_model",
+      "name": "Provider/model flow",
+      "claimed_percent": null,
+      "verified_percent": 62,
+      "status": "PARTIAL",
+      "confidence": "HIGH",
+      "evidence": [
+        "Ollama health reported ok with local models available",
+        "Model selection and capability routing exist"
+      ],
+      "gaps": [
+        "Embeddings not active in live audit",
+        "Token/cost accounting not proven",
+        "Full model management UX missing"
+      ]
+    },
+    {
+      "id": "artifact_report",
+      "name": "Artifact/report flow",
+      "claimed_percent": null,
+      "verified_percent": 66,
+      "status": "PARTIAL",
+      "confidence": "HIGH",
+      "evidence": [
+        "Artifact package, service, routes, and tests exist",
+        "MinIO health reported ok"
+      ],
+      "gaps": [
+        "Signed/download URLs not proven",
+        "Report/export packaging not proven",
+        "Retention and preview UX incomplete"
+      ]
+    },
+    {
+      "id": "ci_release",
+      "name": "CI/release flow",
+      "claimed_percent": null,
+      "verified_percent": 68,
+      "status": "PARTIAL_BLOCKED",
+      "confidence": "HIGH",
+      "evidence": [
+        "CI and Repo Hygiene workflows exist",
+        "Repo Hygiene passed on latest main",
+        "Local compile, lint, tests, frontend build, Docker config, and CLI smoke passed"
+      ],
+      "gaps": [
+        "Latest CI failed in Backend job",
+        "Bash smokes not run locally because Bash was unavailable",
+        "Release cannot be considered green until CI is fixed"
+      ]
+    }
+  ]
+}
