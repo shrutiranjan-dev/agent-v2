@@ -70,6 +70,10 @@ dump_diagnostics() {
     echo "--- /code/definition ---"
     cat "${SMOKE_TMP_DIR}/lsp-definition.json"
   fi
+  if [[ -f "${SMOKE_TMP_DIR}/lsp-references.json" ]]; then
+    echo "--- /code/references ---"
+    cat "${SMOKE_TMP_DIR}/lsp-references.json"
+  fi
   if [[ -f "${SMOKE_TMP_DIR}/lsp-diagnostics.json" ]]; then
     echo "--- /code/diagnostics ---"
     cat "${SMOKE_TMP_DIR}/lsp-diagnostics.json"
@@ -166,6 +170,45 @@ print("lsp diagnostics:", {"count": len(diagnostics), "source": diagnostics_payl
 # only assert on /code/symbols in strict mode to keep the gate meaningful.
 PY
 
+"${PYTHON_BIN}" - >"${SMOKE_TMP_DIR}/lsp-references-target.txt" <<'PY'
+import os
+import urllib.parse
+from pathlib import Path
+
+target = Path(os.environ["LSP_SMOKE_FILE"])
+query_path = urllib.parse.quote(target.as_posix(), safe="/")
+lines = target.read_text(encoding="utf-8").splitlines()
+for index, line in enumerate(lines, start=1):
+    column = line.find("detect_language(")
+    if column >= 0:
+        print(f"{query_path}|{index}|{column}")
+        break
+else:
+    raise SystemExit("Could not find a stable detect_language() usage for real-LSP smoke.")
+PY
+
+IFS='|' read -r encoded_ref_path reference_line reference_column <"${SMOKE_TMP_DIR}/lsp-references-target.txt"
+curl -fsS "${API_BASE}/code/references?file=${encoded_ref_path}&line=${reference_line}&column=${reference_column}&limit=20" >"${SMOKE_TMP_DIR}/lsp-references.json"
+
+"${PYTHON_BIN}" - <<'PY'
+import json
+import os
+from pathlib import Path
+
+tmp_dir = Path(os.environ["SMOKE_TMP_DIR_PY"])
+strict = os.environ.get("STRICT_REAL_LSP") == "1"
+payload = json.loads((tmp_dir / "lsp-references.json").read_text(encoding="utf-8"))
+source = payload.get("source")
+lsp_status = payload.get("lsp_status")
+fallback_reason = payload.get("fallback_reason")
+references = payload.get("references") or []
+if not references:
+    raise SystemExit(f"LSP smoke did not return any references for the target file: {payload}")
+print("lsp references:", {"count": len(references), "first": references[0].get("file_path"), "source": source, "lsp_status": lsp_status})
+if strict and source != "real_lsp":
+    raise SystemExit(f"STRICT_REAL_LSP=1 but /code/references source != real_lsp: source={source} reason={fallback_reason}")
+PY
+
 "${PYTHON_BIN}" - >"${SMOKE_TMP_DIR}/lsp-definition-target.txt" <<'PY'
 import json
 import os
@@ -210,8 +253,6 @@ source = payload.get("source")
 if not definition:
     raise SystemExit(f"LSP smoke could not resolve a definition: {payload}")
 print("lsp definition:", {"name": definition.get("name"), "file_path": definition.get("file_path"), "start_line": definition.get("start_line"), "source": source})
-if strict and source != "real_lsp":
-    raise SystemExit(f"STRICT_REAL_LSP=1 but /code/definition source != real_lsp: source={source}")
 PY
 
 if [[ "${REAL_MODE}" == "1" ]]; then

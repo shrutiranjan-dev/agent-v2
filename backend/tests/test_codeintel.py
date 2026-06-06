@@ -640,6 +640,14 @@ async def test_lsp_service_real_path_via_fake_server_includes_source_real_lsp(
         assert result.fallback_reason is None
 
 
+def test_lsp_resolve_command_supports_args(monkeypatch) -> None:
+    monkeypatch.setattr("shutil.which", lambda command: "/usr/bin/python3" if command == "python" else None)
+
+    from backend.app.codeintel.lsp_client import LspClient
+
+    assert LspClient()._resolve_command("python -m pylsp") == ["/usr/bin/python3", "-m", "pylsp"]
+
+
 async def test_codeintel_routes_include_source_field(monkeypatch, tmp_path) -> None:
     settings = codeintel_test_settings(tmp_path, lsp_enabled=False)
     patch_codeintel_settings(monkeypatch, settings)

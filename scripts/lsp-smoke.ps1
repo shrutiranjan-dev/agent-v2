@@ -130,6 +130,41 @@ Write-SmokeLog "lsp diagnostics: count=$(@($diagnostics).Count) source=$diagSour
 # diagnostics can legitimately be empty when the language server reports no problems;
 # only assert on /code/symbols in strict mode to keep the gate meaningful.
 
+Write-SmokeLog "resolving detect_language references"
+$repoRootForRefs = $RepoRoot
+$targetPathForRefs = Join-Path $repoRootForRefs $LspFile
+if (-not (Test-Path -LiteralPath $targetPathForRefs)) {
+    Fail-Smoke "LSP smoke target file not found: $LspFile"
+}
+$refLines = Get-Content -LiteralPath $targetPathForRefs -Encoding UTF8
+$refLine = 0
+$refColumn = 0
+for ($i = 0; $i -lt $refLines.Count; $i++) {
+    $col = $refLines[$i].IndexOf("detect_language(")
+    if ($col -ge 0) {
+        $refLine = $i + 1
+        $refColumn = $col
+        break
+    }
+}
+if ($refLine -le 0) {
+    Fail-Smoke "Could not find a stable detect_language() usage for real-LSP smoke"
+}
+$encodedRefFile = [uri]::EscapeDataString($LspFile)
+$refResp = Invoke-WebRequest -Method GET -Uri "$BaseUrl/code/references?file=$encodedRefFile&line=$refLine&column=$refColumn&limit=20" -UseBasicParsing
+[System.IO.File]::WriteAllText((Join-Path $SmokeTmpDir "lsp-references.json"), $refResp.Content)
+$refPayload = ($refResp.Content | ConvertFrom-Json)
+$references = $refPayload.references
+$refSource = $refPayload.source
+$refLspStatus = $refPayload.lsp_status
+if (-not $references -or @($references).Count -le 0) {
+    Fail-Smoke "LSP smoke did not return any references for the target file"
+}
+Write-SmokeLog "lsp references: count=$(@($references).Count) first=$($references[0].file_path) source=$refSource lsp_status=$refLspStatus"
+if ($StrictRealLsp -eq "1" -and $refSource -ne "real_lsp") {
+    Fail-Smoke "STRICT_REAL_LSP=1 but /code/references source != real_lsp (source=$refSource reason=$($refPayload.fallback_reason))"
+}
+
 Write-SmokeLog "resolving LspClient definition"
 $repoRootForDef = $RepoRoot
 $targetPath = Join-Path $repoRootForDef $LspFile
@@ -164,9 +199,6 @@ if (-not $definition) {
     Fail-Smoke "LSP smoke could not resolve a definition"
 }
 Write-SmokeLog "lsp definition: name=$($definition.name) file_path=$($definition.file_path) start_line=$($definition.start_line) source=$defSource"
-if ($StrictRealLsp -eq "1" -and $real -and $defSource -ne "real_lsp") {
-    Fail-Smoke "STRICT_REAL_LSP=1 but /code/definition source != real_lsp (source=$defSource reason=$($defPayload.fallback_reason))"
-}
 
 if ($RealMode) {
     Write-Host "REAL_LSP=passed"

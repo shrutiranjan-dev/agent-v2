@@ -222,7 +222,7 @@ jobs:
       AP_OLLAMA_BASE_URL: http://127.0.0.1:9
       AP_WORKSPACE_ROOT: ${{ github.workspace }}
       AP_LSP_ENABLED: "true"
-      AP_LSP_PYTHON_COMMAND: pylsp
+      AP_LSP_PYTHON_COMMAND: python -m pylsp
       AP_BASE_URL: http://localhost:8000
       API_BASE: http://localhost:8000
       SMOKE_TMP_DIR: /tmp/lsp-smoke
@@ -327,22 +327,29 @@ jobs:
         # Use Python (not grep) to check for the --check flag in tui --help.
         # Click/Typer/Rich help formatting varies by version and platform:
         # help can be wrapped, ANSI-styled, or emitted through stderr
-        # instead of stdout on some runner combinations. A combined
-        # stdout+stderr substring check keeps the smoke aligned with the
-        # backend test coverage and surfaces the actual help on failure.
+        # instead of stdout on some runner combinations. We disable color,
+        # strip any remaining ANSI escapes, and then check the plain text.
         run: |
           set -euo pipefail
           python - <<'PY'
+          import os
+          import re
           import subprocess
           import sys
 
+          ansi = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+          env = dict(os.environ)
+          env["NO_COLOR"] = "1"
+          env["TERM"] = "dumb"
           result = subprocess.run(
               [sys.executable, "-m", "backend.app.cli.main", "tui", "--help"],
               capture_output=True,
               text=True,
+              env=env,
           )
           combined = (result.stdout or "") + (result.stderr or "")
-          if "--check" not in combined:
+          plain = ansi.sub("", combined)
+          if "--check" not in plain:
               print("STDOUT:")
               print(result.stdout)
               print("STDERR:")

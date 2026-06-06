@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import json
 import os
+import shlex
 import shutil
 from collections import deque
 from pathlib import Path
@@ -162,10 +163,11 @@ class LspClient:
 
     async def _restart_locked(self, workspace_root: Path) -> None:
         await self._shutdown_locked()
-        self._command = self._resolve_command(get_settings().lsp.python_command)
+        command_parts = self._resolve_command(get_settings().lsp.python_command)
+        self._command = " ".join(command_parts)
         env = self._build_env()
         self._process = await asyncio.create_subprocess_exec(
-            self._command,
+            *command_parts,
             cwd=str(workspace_root),
             env=env,
             stdin=asyncio.subprocess.PIPE,
@@ -323,16 +325,21 @@ class LspClient:
             raise FileNotFoundError(f"LSP document does not exist: {resolved}")
         return resolved
 
-    def _resolve_command(self, command: str) -> str:
-        candidate = Path(command).expanduser()
+    def _resolve_command(self, command: str) -> list[str]:
+        parts = shlex.split(command, posix=os.name != "nt")
+        if not parts:
+            raise RuntimeError("LSP command is empty.")
+        executable = parts[0]
+        candidate = Path(executable).expanduser()
         if candidate.is_absolute():
             if not candidate.exists():
                 raise RuntimeError(f"LSP command not found: {command}")
-            return str(candidate)
-        resolved = shutil.which(command)
+            resolved = str(candidate)
+        else:
+            resolved = shutil.which(executable)
         if not resolved:
             raise RuntimeError(f"LSP command not found: {command}")
-        return resolved
+        return [resolved, *parts[1:]]
 
     def _build_env(self) -> dict[str, str]:
         env: dict[str, str] = {"PYTHONUNBUFFERED": "1"}
