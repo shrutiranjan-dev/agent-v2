@@ -143,13 +143,13 @@
 - Exact file(s): `backend/app/runtime/context_builder.py`
 - Exact recommended fix: Create context builder selecting recent messages, summaries, tool results, workspace metadata, and memory snippets under a budget.
 - Risk if ignored: Long sessions become unreliable and local models lose operational context.
-
 ### TUI client
-- Current improvement: A minimal Rich TUI loop now supports session listing, session creation/opening, agent switching, prompt sending, and queue/session status.
-- Why it matters: Headless users have less interactive control than OpenCode users.
-- Exact file(s): `backend/app/cli/tui_app.py`.
-- Exact recommended next fix: add a Textual or equivalent full-screen layout with left session list, center event stream, right run/tool status, bottom input, and modal permission/human-input panels.
-- Risk if ignored: Terminal users have a functional flow, but not yet the fast keyboard-native polish expected from a dedicated coding TUI.
+
+- Current improvement: A Rich TUI loop with an explicit `_TuiState` class and state-locked `PermissionModal`/`HumanInputModal`/`DiffModal` modals now supports session listing/creation/opening, interactive agent switching, prompt sending, queue status, the latest diff for a session, and retrying failed queue jobs. See `docs/opencode-study/implementation-roadmap.md` for the CLI/TUI Coding Flow Batch 2 result.
+- Why it matters: Headless users can drive the platform from a terminal with state-locked modals and a real retry path.
+- Exact file(s): `backend/app/cli/tui_app.py`, `backend/app/cli/tui_modals.py`, `backend/tests/test_tui_flow.py`, `scripts/cli-tui-smoke.ps1`.
+- Exact recommended next fix: promote the Rich TUI to a Textual-style full-screen layout with session/agent side panels, cursor-aware replay, and richer message-part rendering.
+- Risk if ignored: Terminal users have a stateful, tested modal flow, but the layout is still a serial REPL instead of a full-screen coding workspace.
 
 ### Web UI dashboard
 - Current problem: Dashboard.tsx is a large single component; Polling and WebSocket state are mixed into one page

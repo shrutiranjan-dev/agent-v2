@@ -176,8 +176,14 @@ PowerShell examples:
 .\.venv\Scripts\python -m backend.app.cli.main agents
 .\.venv\Scripts\python -m backend.app.cli.main sessions list
 .\.venv\Scripts\python -m backend.app.cli.main sessions create --title "My session" --agent build
+.\.venv\Scripts\python -m backend.app.cli.main events --session <session-id>
+.\.venv\Scripts\python -m backend.app.cli.main permissions --session <session-id>
+.\.venv\Scripts\python -m backend.app.cli.main questions --session <session-id>
+.\.venv\Scripts\python -m backend.app.cli.main diff --session <session-id>
 .\.venv\Scripts\python -m backend.app.cli.main chat --session <session-id> --agent build "Implement the next safe task"
 .\.venv\Scripts\python -m backend.app.cli.main queue status
+.\.venv\Scripts\python -m backend.app.cli.main queue retry <job-id>
+.\.venv\Scripts\python -m backend.app.cli.main queue show <job-id>
 .\.venv\Scripts\python -m backend.app.cli.main artifacts list --session <session-id>
 .\.venv\Scripts\python -m backend.app.cli.main tui
 ```
@@ -197,7 +203,34 @@ agentv2 health
 agentv2 tui
 ```
 
-The deterministic smoke script avoids model-dependent generation:
+TUI commands (Rich-based REPL with state-locked modals):
+
+```text
+help                    Show this help text.
+health                  Show backend health.
+agents                  List available agents.
+agent                   Open the agent switcher.
+agent <id>              Set the active agent by id.
+sessions                List sessions.
+new                     Create a new session.
+use <id>                Switch to an existing session.
+events                  Show recent events for the active session.
+permissions             Show pending permission requests.
+questions               Show pending human-input requests.
+approve <id>            Approve a permission request.
+deny <id>               Deny a permission request.
+answer <id> <text>      Answer a human-input request.
+diff                    Show the latest diff (active session).
+diff <id>               Show the latest diff for a session id.
+retry                   Retry the latest failed job (active session).
+retry <job_id>          Retry a specific queue job.
+status                  Show sessions and queue status.
+send <prompt>           Send a prompt to the active session.
+quit                    Exit the TUI.
+```
+
+The deterministic smoke script avoids model-dependent generation and exercises
+the new commands plus the TUI import smoke:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\cli-tui-smoke.ps1

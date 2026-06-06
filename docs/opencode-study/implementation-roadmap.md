@@ -1254,3 +1254,71 @@
 - The dashboard currently supports retry and pre-run cancellation only; safe cancellation of actively running work remains intentionally blocked.
 - The runtime view is polling-based and does not yet have a dedicated queue/worker websocket stream.
 - Worker heartbeat history is not retained yet; Batch 1 stores the latest state per worker for operator visibility.
+# CLI/TUI Coding Flow Batch 2 Implementation Result
+
+## Status
+
+- The earlier `d8261be` "Polish OpenCode-style interactive TUI flow" commit was found to be misrepresented: only a single 375-line `tui_app.py` was changed, no tests/docs/smoke were added, and the retry claim referenced a non-existent endpoint even though `POST /queue/jobs/{id}/retry` already existed. See `docs/opencode-study/101-cli-tui-batch2-audit.md` for the full audit and resolution status.
+- This batch closes the audit gaps by adding the missing CLI commands, real modal state machine, and real retry wiring.
+
+## Files changed
+
+- `backend/app/cli/api_client.py`
+- `backend/app/cli/main.py`
+- `backend/app/cli/render.py`
+- `backend/app/cli/tui_app.py`
+- `backend/app/cli/tui_modals.py` (new)
+- `backend/tests/test_cli_flow.py`
+- `backend/tests/test_tui_flow.py` (new)
+- `scripts/cli-tui-smoke.ps1`
+- `docs/opencode-study/101-cli-tui-batch2-audit.md` (updated)
+- `docs/opencode-study/flow-parity-matrix.json`
+- `docs/opencode-study/100-opencode-flow-parity-roadmap.md`
+- `docs/opencode-study/polish-needed.md`
+- `README.md`
+
+## CLI commands
+
+- Added Typer commands: `events --session <id>`, `permissions --session <id>`, `questions --session <id>`, `diff --session <id> --max-lines N`, `queue retry <job_id>`, `queue show <job_id>`. The existing `health`, `agents`, `sessions list/create/show`, `chat`, `queue status`, `artifacts list`, and `tui` commands are unchanged and still pass help/parse tests.
+- `events`, `permissions`, and `questions` use the existing `/sessions/{id}/events`, `/permissions`, and `/human-input/requests` endpoints; they print a unified `events_table` rather than raw JSON.
+- `diff` walks the events returned by `/sessions/{id}/events`, finds the most recent permission/tool payload that exposes a diff preview, and renders it through the existing `diff_preview_panel` and `Syntax("diff")` redaction path. When no diff is recorded the command prints a clear yellow panel and exits 0.
+- `queue retry` calls the existing `POST /queue/jobs/{id}/retry` endpoint through `AgentApiClient.retry_queue_job`. Backend conflicts (HTTP 409) propagate to a non-zero CLI exit code; the TUI prints a clean error.
+- `queue show` calls `GET /queue/jobs/{id}` and is wired through `AgentApiClient.get_queue_job`.
+- Backend errors return non-zero through the existing `CliApiError` path; the smoke script asserts both the success and the help paths.
+
+## TUI modal state machine
+
+- Added `backend/app/cli/tui_modals.py` with `PermissionModal`, `HumanInputModal`, and `DiffModal`. Each modal has a `ModalState` (`open` to `submitting` to `closed`) and uses an internal `threading.Lock` to make duplicate approve/deny/answer/cancel actions return `ModalResult.SKIPPED` with `detail="duplicate"` instead of issuing a second API call.
+- The modals also catch `CliApiError`, transition to `ModalResult.FAILED`, and leave the modal closed so a follow-up call will not silently succeed.
+- `PermissionModal` and `HumanInputModal` render to Rich `Panel` objects and the TUI loop prints them through the standard `console.print` path.
+- `DiffModal` searches events in reverse for the most recent permission/tool payload whose `permission_key` / `tool_name` matches a file-mutation key (`write.file`, `edit.file`, `patch.apply`), reuses `extract_diff_preview` to honor redaction, and truncates large diffs safely with a "N more lines truncated" marker.
+
+## TUI loop and agent switcher
+
+- `backend/app/cli/tui_app.py` was rewritten as a `_TuiState` class that loads agents on welcome, defaults to the first available agent, and provides an interactive `agent` command that lists agents through the existing `agents_table` renderer and validates the chosen id against the backend list.
+- Selecting a new agent updates the active agent and is applied to the next `send <prompt>` only; past runs and their events are not mutated.
+- Added TUI commands: `help`, `health`, `events`, `permissions`, `questions`, `diff [id]`, `approve <id>`, `deny <id>`, `answer <id> <text>`, `retry [job_id]`, in addition to the existing `agents`, `sessions`, `use`, `new`, `agent <id>`, `status`, `send`, `quit`.
+- `events`/`permissions`/`questions` register their modals and print the existing renderers.
+- `retry` lists retryable jobs (failed, dead-lettered, cancelled) and dispatches to `AgentApiClient.retry_queue_job`; `retry <job_id>` calls the endpoint directly. A 409 conflict prints a red panel and does not raise.
+- `diff` defaults to the active session; `diff <id>` shows the diff for a specific session id without changing the active session.
+
+## Smoke and tests
+
+- `scripts/cli-tui-smoke.ps1` now waits for backend health, runs `health`, `agents`, `sessions create`, `sessions list`, `events`, `permissions`, `questions`, `diff` (no-diff case), `queue status`, `queue retry --help`, `queue show --help`, `artifacts list`, `tui --help`, and a `python -c "..."` import smoke that does not require manual interactive input.
+- Added `backend/tests/test_cli_flow.py` covering CLI help, the new `events`/`permissions`/`questions`/`diff` commands (including no-diff graceful behavior and queue retry 409 non-zero exit), and the existing permission/human-input/diff renderers.
+- Added `backend/tests/test_tui_flow.py` covering the TUI state class, agent switcher validation, send-with-agent and send-without-agent behavior, retry dispatch and conflict handling, permission/human-input modal duplicate prevention through the live TUI loop, a TUI run-loop smoke with a stubbed `rich.prompt.Prompt.ask`, and the diff modal in the no-diff, normal, and truncated cases.
+- Final validation: backend tests pass 187 + 4 skipped, `python -m compileall backend/app` clean, `python -m ruff check backend/app backend/tests` clean.
+
+## Parity and docs
+
+- Updated `docs/opencode-study/flow-parity-matrix.json`: `cli_tui_coding_flow` moved from `partial` @ 58% to `strong_partial` @ 74% with explicit evidence for the new files, the test files, and the smoke script. Overall parity moved from 69% to 71% with the `queue_worker_flow` increasing to 82% to reflect the new CLI/TUI retry wiring.
+- Updated `docs/opencode-study/100-opencode-flow-parity-roadmap.md` and this file to describe the Batch 2 follow-up truthfully.
+- Updated `docs/opencode-study/polish-needed.md` CLI/TUI entry to reflect the Batch 2 follow-up and remove the now-obsolete "next fix" call.
+- Updated `README.md` to describe the new CLI commands and TUI behavior.
+
+## Remaining gaps (Batch 2)
+
+- The TUI is still a Rich-based REPL with a `_TuiState` class and explicit modal state machines. A future batch should promote it to a Textual-style full-screen layout with side panels, cursor-aware replay, and richer message-part rendering.
+- `events`, `permissions`, and `questions` rely on the same `events_table` renderer; a dedicated TUI live-stream would be a stronger follow-up.
+- Retry remains an explicit operator action: there is no automatic retry from a session event, only the manual `retry` / `queue retry` path. The backend already supports retry, so this is a UX gap, not a capability gap.
+

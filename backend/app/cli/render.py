@@ -145,6 +145,58 @@ def render_error(error: Exception) -> Panel:
     return Panel(str(error), title=error.__class__.__name__, border_style="red")
 
 
+def events_table(events: list[dict[str, Any]]) -> Table:
+    table = Table(title="Events")
+    table.add_column("ID", style="cyan", no_wrap=True)
+    table.add_column("Type", style="bold")
+    table.add_column("Status")
+    table.add_column("Resource")
+    table.add_column("Risk")
+    table.add_column("Created")
+    for event in events:
+        event_id = str(
+            event.get("id")
+            or event.get("permission_request_id")
+            or event.get("human_input_request_id")
+            or event.get("queue_job_id")
+            or event.get("event_id")
+            or ""
+        )
+        event_type = str(
+            event.get("type")
+            or event.get("event_type")
+            or event.get("kind")
+            or "event"
+        )
+        status = str(
+            event.get("status")
+            or (event.get("payload") or {}).get("status")
+            or ""
+        )
+        resource = str(
+            event.get("resource")
+            or (event.get("payload") or {}).get("resource")
+            or ""
+        )
+        metadata = (event.get("payload") or {}).get("metadata") or {}
+        risk = str(
+            event.get("risk_level")
+            or metadata.get("risk_level")
+            or ""
+        )
+        created = str(
+            event.get("created_at")
+            or event.get("timestamp")
+            or ""
+        )
+        table.add_row(event_id, event_type, status, resource, risk, created)
+    return table
+
+
+def diff_renderable(payload: dict[str, Any]) -> RenderableType:
+    return diff_preview_panel(payload)
+
+
 def print_event(console: Console, event: dict[str, Any]) -> None:
     console.print(event_renderable(event))
 

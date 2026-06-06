@@ -116,6 +116,23 @@ class AgentApiClient(AbstractContextManager["AgentApiClient"]):
     def queue_stats(self) -> dict[str, Any]:
         return self._request("GET", "/queue/stats")
 
+    def get_queue_job(self, queue_job_id: str) -> dict[str, Any]:
+        return self._request("GET", f"/queue/jobs/{queue_job_id}").get("job", {})
+
+    def retry_queue_job(self, queue_job_id: str, *, reason: str = "cli_retry") -> dict[str, Any]:
+        return self._request(
+            "POST",
+            f"/queue/jobs/{queue_job_id}/retry",
+            json={"reason": reason, "publish": True},
+        ).get("job", {})
+
+    def cancel_queue_job(self, queue_job_id: str, *, reason: str = "cli_cancel") -> dict[str, Any]:
+        return self._request(
+            "POST",
+            f"/queue/jobs/{queue_job_id}/cancel",
+            json={"reason": reason, "publish": True},
+        ).get("job", {})
+
     def list_artifacts(self, *, session_id: str | None = None) -> list[dict[str, Any]]:
         path = f"/sessions/{session_id}/artifacts" if session_id else "/artifacts"
         payload = self._request("GET", path)

@@ -9,7 +9,7 @@
     "source": "external/opencode-source/packages/opencode/src",
     "note": "Reference evidence is used only for flow comparison. This project should not copy branding, UX language, or implementation details."
   },
-  "overall_parity_percent": 69,
+  "overall_parity_percent": 71,
   "selected_next_batch": {
     "id": "cli_tui_coding_flow",
     "why": "CI and runtime validation are green; the highest-value product gap is now a keyboard-native local coding loop that uses the existing backend runtime.",
@@ -19,16 +19,29 @@
     {
       "id": "cli_tui_coding_flow",
       "category": "CLI/TUI coding flow",
-      "status": "partial",
-      "parity_percent": 58,
-      "evidence_files": ["backend/app/cli/main.py", "backend/app/cli/api_client.py", "backend/app/cli/websocket_client.py", "backend/app/cli/tui_app.py", "scripts/cli-tui-smoke.ps1"],
-      "opencode_reference_evidence": ["cli/cmd/tui/routes/session/index.tsx", "server/shared/tui-control.ts"],
-      "impact": "Users can now start from terminal, list/create sessions, choose agents, send prompts, stream session events, reply to permission and human-input prompts, inspect queue jobs, and list artifacts without using the web dashboard.",
-      "next_task": "Upgrade the minimal Rich TUI to a full modal layout with durable cursor replay, richer message parts, and keyboard-first session switching.",
+      "status": "strong_partial",
+      "parity_percent": 74,
+      "evidence_files": [
+        "backend/app/cli/main.py",
+        "backend/app/cli/api_client.py",
+        "backend/app/cli/websocket_client.py",
+        "backend/app/cli/tui_app.py",
+        "backend/app/cli/tui_modals.py",
+        "backend/app/cli/diff_preview.py",
+        "backend/tests/test_cli_flow.py",
+        "backend/tests/test_tui_flow.py",
+        "scripts/cli-tui-smoke.ps1"
+      ],
+      "opencode_reference_evidence": [
+        "cli/cmd/tui/routes/session/index.tsx",
+        "server/shared/tui-control.ts"
+      ],
+      "impact": "Operators can drive the platform from a terminal: list/create sessions, switch agents interactively, send prompts, stream session events, approve/deny permissions and answer/cancel human-input requests through state-locked modals, view the latest diff for a session, retry failed queue jobs, and list artifacts. The CLI also exposes `events`, `permissions`, `questions`, `diff`, and `queue retry` commands for scripted workflows.",
+      "next_task": "Promote the Rich TUI to a full Textual-style modal layout with session/agent side panels, durable cursor replay, and richer message-part rendering.",
       "priority": "P1",
-      "effort": "large",
-      "risk": "medium",
-      "validation": "CLI tests cover API calls, command parsing, renderers, permission replies, human-input replies, and diff preview; CLI smoke validates deterministic commands without requiring model generation."
+      "effort": "medium",
+      "risk": "low",
+      "validation": "29 CLI flow tests and 20 TUI flow tests pass (49 total in this batch). Backend tests: 187 passed, 4 skipped. CLI smoke script validates health, agents, sessions, events, permissions, questions, diff (no-diff case), queue status, queue retry help, and tui help/import."
     },
     {
       "id": "web_desktop_session_flow",
@@ -146,15 +159,15 @@
       "id": "queue_worker_flow",
       "category": "Queue/worker flow",
       "status": "strong_partial",
-      "parity_percent": 80,
-      "evidence_files": ["backend/app/api/routes_queue.py", "backend/app/queue/worker.py", "backend/app/queue/worker_heartbeats.py", "frontend/src/pages/Dashboard.tsx"],
+      "parity_percent": 82,
+      "evidence_files": ["backend/app/api/routes_queue.py", "backend/app/queue/worker.py", "backend/app/queue/worker_heartbeats.py", "backend/app/cli/api_client.py", "backend/app/cli/main.py", "backend/app/cli/tui_app.py", "frontend/src/pages/Dashboard.tsx"],
       "opencode_reference_evidence": ["server/event.ts", "session/run-state.ts", "server/routes/instance/httpapi/handlers/control.ts"],
-      "impact": "Queue stats, jobs, retry/cancel controls, and worker heartbeats are visible after f7b1ad1.",
+      "impact": "Queue stats, jobs, retry/cancel controls, and worker heartbeats are visible after f7b1ad1. The CLI/TUI batch wires `agentv2 queue retry <id>` and the TUI `retry` command to the real `POST /queue/jobs/{id}/retry` endpoint; failed jobs return a non-zero exit code on conflict, the TUI prints a clean failure message, and the existing API still validates state before retry.",
       "next_task": "Add push-driven queue updates through websocket/SSE and optional heartbeat history retention.",
       "priority": "P1",
       "effort": "medium",
       "risk": "medium",
-      "validation": "Queue worker smoke plus worker stats endpoint checks."
+      "validation": "Queue worker smoke plus worker stats endpoint checks. CLI/TUI tests cover successful retry and 409 conflict handling."
     },
     {
       "id": "github_workflow",
