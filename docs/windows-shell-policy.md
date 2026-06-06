@@ -140,4 +140,7 @@ smokes were run. The PowerShell wrapper also runs prerequisite checks
 (backend health, dependency health, env vars, Docker worker state) and
 prints `SMOKE_RESULT=skipped` with a short `SMOKE_REASON` whenever the
 underlying Bash smoke cannot be exercised; this is documented in
-[`docs/ci.md`](ci.md) under "Smoke Result Semantics".
+[`docs/ci.md`](ci.md) under "Smoke Result Semantics". The wrapper also
+emits `SMOKE_CATEGORY=optional` so `validate-local.ps1 -RequireOptionalSmokes`
+can promote missing-prerequisite skips to a required-step failure (which
+also makes the validator exit non-zero).

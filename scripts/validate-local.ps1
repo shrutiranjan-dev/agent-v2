@@ -18,13 +18,20 @@ $ScriptName = "validate-local"
 # Optional check with prerequisites present: PASS / WARN / FAIL.
 # Optional check with missing prerequisite: SKIP (never FAIL by default).
 #   The user can opt into stricter handling with -RequireOptionalSmokes,
-#   which converts SKIP -> FAIL.
+#   which promotes optional SKIP / FAIL conditions to required failures
+#   so the script exits non-zero when an optional smoke could not run or
+#   did not pass. WARN stays WARN (it is neither skip nor fail).
 #
 # Result categories:
 #   pass:    check succeeded
 #   fail:    check failed (or was SKIP and -RequireOptionalSmokes was set)
 #   skip:    optional check could not run because a prerequisite is missing
 #   warn:    optional check ran but found a degraded / non-blocking condition
+#
+# Exit behaviour:
+#   Default:                        exit 1 iff a required step failed.
+#   -RequireOptionalSmokes:         exit 1 iff any required step failed OR
+#                                    any optional smoke was promoted to FAIL.
 # ---------------------------------------------------------------------------
 
 $script:StepsPassed = 0
@@ -32,6 +39,7 @@ $script:StepsFailed = 0
 $script:StepsSkipped = 0
 $script:StepsWarned = 0
 $script:RequiredStepsFailed = 0
+$script:PromotedOptionalStepsFailed = 0
 $script:StepRecords = @()
 
 function Write-Step {
@@ -49,19 +57,23 @@ function Record-Step {
         [Parameter(Mandatory = $true)]
         [ValidateSet("pass", "fail", "skip", "warn")]
         [string]$Result,
-        [string]$Detail = ""
+        [string]$Detail = "",
+        [switch]$PromotedToRequired
     )
     $script:StepRecords += [pscustomobject]@{
         name = $Name
         category = $Category
         result = $Result
         detail = $Detail
+        promoted = [bool]$PromotedToRequired
     }
     switch ($Result) {
         "pass" { $script:StepsPassed += 1 }
         "fail" {
             $script:StepsFailed += 1
-            if ($Category -eq "required") {
+            if ($PromotedToRequired) {
+                $script:PromotedOptionalStepsFailed += 1
+            } elseif ($Category -eq "required") {
                 $script:RequiredStepsFailed += 1
             }
         }
@@ -93,7 +105,11 @@ function Write-Summary {
         }
         $line = "[$ScriptName] $marker $($record.name)"
         if ($record.category -eq "optional") {
-            $line += " (optional)"
+            if ($record.promoted) {
+                $line += " (optional, promoted to required)"
+            } else {
+                $line += " (optional)"
+            }
         }
         if ($record.detail) {
             $line += " - $($record.detail)"
@@ -102,6 +118,10 @@ function Write-Summary {
     }
     Write-Step ("summary: passed={0} failed={1} skipped={2} warned={3}" -f `
         $script:StepsPassed, $script:StepsFailed, $script:StepsSkipped, $script:StepsWarned)
+    if ($script:PromotedOptionalStepsFailed -gt 0) {
+        Write-Step ("promoted optional failures (RequireOptionalSmokes): {0}" -f `
+            $script:PromotedOptionalStepsFailed)
+    }
 }
 
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
@@ -274,6 +294,11 @@ if ($WithSmokes) {
     $smokePasses = @()
     $smokeWarns = @()
     foreach ($smoke in $smokeScripts) {
+        # Reset promotion state for this smoke. PowerShell 5.1 keeps variables
+        # defined inside foreach bodies across iterations, so without this the
+        # "promoted to required" annotation leaks into the next smoke even
+        # when only the previous one was actually promoted.
+        $promoted = $false
         $smokeStep = "smoke: $smoke"
         $path = Join-Path $RepoRoot "scripts\$smoke"
         if (-not (Test-Path -LiteralPath $path)) {
@@ -357,24 +382,35 @@ if ($WithSmokes) {
             Write-Step "--- end $smoke output ---"
         }
 
-        if ($RequireOptionalSmokes -and $smokeCategory -eq "optional" -and $result -eq "skip") {
-            $result = "fail"
-            $smokeSkips = @($smokeSkips | Where-Object { $_ -ne $smoke })
-            $smokeFailures += $smoke
-            $detail = "RequireOptionalSmokes: " + $detail
+        if ($RequireOptionalSmokes -and $smokeCategory -eq "optional") {
+            if ($result -eq "skip" -or $result -eq "fail") {
+                $promoted = $true
+                $priorResult = $result
+                $result = "fail"
+                if ($priorResult -eq "skip") {
+                    $smokeSkips = @($smokeSkips | Where-Object { $_ -ne $smoke })
+                } else {
+                    $smokeFailures = @($smokeFailures | Where-Object { $_ -ne $smoke })
+                }
+                $smokeFailures += $smoke
+                $detail = "RequireOptionalSmokes: " + $detail
+            }
         }
 
-        Record-Step -Name $smokeStep -Category $smokeCategory -Result $result -Detail $detail
+        Record-Step -Name $smokeStep -Category $smokeCategory -Result $result -Detail $detail -PromotedToRequired:($promoted -eq $true)
         Remove-Item -LiteralPath $stdoutFile, $stderrFile -ErrorAction SilentlyContinue
     }
     Write-Step ("smoke summary: passed={0} failed={1} skipped={2} warned={3}" -f `
         $smokePasses.Count, $smokeFailures.Count, $smokeSkips.Count, $smokeWarns.Count)
-    if ($smokeFailures.Count -gt 0) {
-        # Optional smoke failures do not fail the overall validation; they
-        # are reported in the summary so the user can see what was attempted
-        # and what did not pass. Required-step failures (compile, ruff,
-        # pytest, frontend, docker config, CLI/TUI smoke) still exit 1.
-        Write-Step "WARN: optional smoke failures do not fail validation: $($smokeFailures -join ', ')"
+    if ($smokeFailures.Count -gt 0 -and -not $RequireOptionalSmokes) {
+        # Default: optional smoke failures do not fail the overall
+        # validation; they are reported in the summary so the user can see
+        # what was attempted and what did not pass. With
+        # -RequireOptionalSmokes the promotion above turns each one into a
+        # promoted-to-required failure, which the exit check below catches.
+        Write-Step "WARN: optional smoke failures do not fail validation by default: $($smokeFailures -join ', ')"
+    } elseif ($smokeFailures.Count -gt 0 -and $RequireOptionalSmokes) {
+        Write-Step "FAIL: -RequireOptionalSmokes promoted $($smokeFailures.Count) optional smoke failure(s) to required: $($smokeFailures -join ', ')"
     }
 } else {
     Write-Step "WithSmokes not requested; pass -WithSmokes to run available PowerShell smokes"
@@ -393,8 +429,18 @@ if ($WithSmokes) {
 }
 
 Write-Summary
+$exitCode = 0
+$exitReasons = @()
 if ($script:RequiredStepsFailed -gt 0) {
-    Write-Error "[$ScriptName] FAIL: $script:RequiredStepsFailed required step(s) failed"
+    $exitCode = 1
+    $exitReasons += "$($script:RequiredStepsFailed) required step(s) failed"
+}
+if ($RequireOptionalSmokes -and $script:PromotedOptionalStepsFailed -gt 0) {
+    $exitCode = 1
+    $exitReasons += "$($script:PromotedOptionalStepsFailed) optional smoke(s) promoted to required failures (RequireOptionalSmokes)"
+}
+if ($exitCode -ne 0) {
+    Write-Error "[$ScriptName] FAIL: $($exitReasons -join '; ')"
     exit 1
 }
 Write-Step "ok"

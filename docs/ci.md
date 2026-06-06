@@ -285,8 +285,11 @@ Exit behaviour:
   missing; never increments `failed` and never exits non-zero by default.
 - `warned` -> optional check ran and found a degraded / non-blocking
   condition; never exits non-zero.
-- `-RequireOptionalSmokes` converts optional `SKIP` -> `FAIL` so the user
-  can opt into stricter handling.
+- `-RequireOptionalSmokes` converts optional `SKIP` and `FAIL` -> a
+  required-step `FAIL` so the user can opt into stricter handling. By
+  default the script still exits 0 when only optional smokes are
+  promoted; with `-RequireOptionalSmokes` any promoted optional failure
+  makes the script exit non-zero. `WARN` results are never promoted.
 
 Required Windows smokes (must pass on every run):
 
@@ -325,5 +328,6 @@ How to enable optional smokes intentionally:
   scripts\mcp-plugin-smoke.ps1` to opt into the full MCP plugin flow
   (still needs Bash on Windows for the actual plugin load test).
 - `powershell -ExecutionPolicy Bypass -File scripts\validate-local.ps1
-  -WithSmokes -RequireOptionalSmokes` to promote every `SKIP` to `FAIL`
+  -WithSmokes -RequireOptionalSmokes` to promote every optional `SKIP` and
+  `FAIL` to a required `FAIL`, exit non-zero if any promotion happened,
   and see which optional checks the local environment cannot run.

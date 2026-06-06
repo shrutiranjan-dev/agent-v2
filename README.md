@@ -183,8 +183,10 @@ Exit behaviour:
 - `warned` -> optional check ran and found a degraded / non-blocking
   condition; never exits non-zero.
 - `-RequireOptionalSmokes` (or `--require-optional-smokes` in Bash)
-  converts optional `SKIP` -> `FAIL` so the user can opt into stricter
-  handling.
+  converts optional `SKIP` and `FAIL` -> a required-step `FAIL`. With the
+  flag the script exits non-zero if any promotion happened; without the
+  flag the default is still non-fatal for optional skips/fails. `WARN`
+  results are never promoted.
 
 Required Windows smokes (must pass on every run):
 
@@ -226,7 +228,8 @@ $env:AP_ENABLE_TEST_ENDPOINTS = "true"
 docker compose up -d --build backend
 powershell -ExecutionPolicy Bypass -File scripts\permission-resume-smoke.ps1
 
-# Promote every SKIP to FAIL so the validator surfaces missing
+# Promote every optional SKIP/FAIL to a required FAIL and exit non-zero
+# if any promotion happened, so the validator surfaces missing
 # prerequisites instead of skipping them silently.
 powershell -ExecutionPolicy Bypass -File scripts\validate-local.ps1 -WithSmokes -RequireOptionalSmokes
 ```
