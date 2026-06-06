@@ -17,6 +17,9 @@ PYTHON=".venv/bin/python"
 if [[ "$(uname -s)" != "Linux" && -x ".venv/Scripts/python.exe" ]]; then
   PYTHON=".venv/Scripts/python.exe"
 fi
+if [[ ! -x "${PYTHON}" ]]; then
+  PYTHON="python"
+fi
 
 log() {
   printf '[observability-smoke] %s\n' "$*"

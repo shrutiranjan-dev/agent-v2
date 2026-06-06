@@ -19,7 +19,6 @@ jobs:
       AP_REDIS_PUBSUB_ENABLED: "false"
       AP_QDRANT_ENABLED: "false"
       AP_MEMORY_EMBEDDING_ENABLED: "false"
-      AP_OLLAMA_BASE_URL: http://127.0.0.1:9
       AP_WORKSPACE_ROOT: ${{ github.workspace }}
     steps:
       - uses: actions/checkout@v4
