@@ -20,6 +20,22 @@ from backend.app.core.redaction import redact_text
 from backend.app.tools.base import is_inside
 
 
+def parse_lsp_command(command: str | list[str]) -> list[str]:
+    if isinstance(command, list):
+        parts = [str(part) for part in command if str(part).strip()]
+        if not parts:
+            raise RuntimeError("LSP command is empty.")
+        return parts
+    try:
+        parts = shlex.split(command, posix=os.name != "nt")
+    except ValueError as exc:
+        raise RuntimeError(f"Invalid LSP command: {command}") from exc
+    parts = [part[1:-1] if len(part) >= 2 and part[0] == part[-1] and part[0] in {'"', "'"} else part for part in parts]
+    if not parts:
+        raise RuntimeError("LSP command is empty.")
+    return parts
+
+
 def encode_jsonrpc_message(payload: dict[str, Any]) -> bytes:
     body = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     return f"Content-Length: {len(body)}\r\n\r\n".encode("ascii") + body
@@ -54,7 +70,7 @@ class LspClient:
         self._command: str | None = None
         self._capabilities: dict[str, Any] = {}
         self._configured_command: str | None = None
-        self._resolved_command: list[str] = []
+        self._spawn_argv: list[str] = []
         self._spawn_debug: dict[str, Any] = {}
 
     async def health(self, workspace_root: Path) -> dict[str, Any]:
@@ -172,28 +188,49 @@ class LspClient:
     async def _restart_locked(self, workspace_root: Path) -> None:
         await self._shutdown_locked()
         self._configured_command = get_settings().lsp.python_command
-        command_parts = self._resolve_command(self._configured_command)
-        if isinstance(command_parts, str):
-            command_parts = [command_parts]
-        self._resolved_command = list(command_parts)
-        self._command = " ".join(command_parts)
+        try:
+            command_info = self._resolve_command(self._configured_command)
+        except Exception as exc:
+            self._spawn_argv = []
+            self._command = str(self._configured_command)
+            self._spawn_debug = {
+                "configured_command": self._configured_command,
+                "spawn_argv": [],
+                "executable": None,
+                "resolved_executable": None,
+                "command_exists": False,
+                "script_path": None,
+                "script_exists": None,
+                "cwd": str(workspace_root),
+                "workspace_root": str(workspace_root.resolve()),
+                "path": os.environ.get("PATH"),
+                "last_error_type": type(exc).__name__,
+                "last_error": redact_text(str(exc)),
+            }
+            raise
+        spawn_argv = command_info["spawn_argv"]
+        self._spawn_argv = list(spawn_argv)
+        self._command = " ".join(spawn_argv) if spawn_argv else str(self._configured_command)
         env = self._build_env()
         self._spawn_debug = {
             "configured_command": self._configured_command,
-            "resolved_command": list(command_parts),
-            "spawn_argv": list(command_parts),
-            "command_exists": bool(command_parts and Path(command_parts[0]).exists()),
+            "spawn_argv": list(spawn_argv),
+            "executable": command_info["executable"],
+            "resolved_executable": command_info["resolved_executable"],
+            "command_exists": command_info["command_exists"],
+            "script_path": command_info["script_path"],
+            "script_exists": command_info["script_exists"],
             "cwd": str(workspace_root),
             "workspace_root": str(workspace_root.resolve()),
-            "spawn_env_path": env.get("PATH"),
-            "spawn_env_pythonpath": env.get("PYTHONPATH"),
-            "spawn_env_ld_library_path": env.get("LD_LIBRARY_PATH"),
-            "spawn_env_virtual_env": env.get("VIRTUAL_ENV"),
-            "spawn_env_keys": sorted(env.keys()),
+            "path": env.get("PATH"),
         }
+        if not command_info["command_exists"]:
+            self._spawn_debug["last_error_type"] = "RuntimeError"
+            self._spawn_debug["last_error"] = redact_text(str(command_info["error"]))
+            raise RuntimeError(str(command_info["error"]))
         try:
             self._process = await asyncio.create_subprocess_exec(
-                *command_parts,
+                *spawn_argv,
                 cwd=str(workspace_root),
                 env=env,
                 stdin=asyncio.subprocess.PIPE,
@@ -355,24 +392,49 @@ class LspClient:
             raise FileNotFoundError(f"LSP document does not exist: {resolved}")
         return resolved
 
-    def _resolve_command(self, command: str) -> list[str]:
-        parts = shlex.split(command, posix=os.name != "nt")
-        if not parts:
-            raise RuntimeError("LSP command is empty.")
+    def _resolve_command(self, command: str | list[str]) -> dict[str, Any]:
+        parts = parse_lsp_command(command)
         executable = parts[0]
         candidate = Path(executable).expanduser()
-        if candidate.is_absolute():
-            if not candidate.exists():
-                raise RuntimeError(f"LSP command not found: {command}")
-            resolved = str(candidate)
+        resolved_executable: str | None = None
+        if candidate.is_absolute() or candidate.parent != Path("."):
+            if candidate.exists():
+                resolved_executable = str(candidate)
         else:
-            resolved = shutil.which(executable)
-        if not resolved:
-            raise RuntimeError(f"LSP command not found: {command}")
-        return [resolved, *parts[1:]]
+            resolved_executable = shutil.which(executable)
+        script_path, script_exists = self._detect_script_path(parts)
+        return {
+            "configured_command": command if isinstance(command, str) else " ".join(parts),
+            "spawn_argv": ([resolved_executable, *parts[1:]] if resolved_executable else list(parts)),
+            "executable": executable,
+            "resolved_executable": resolved_executable,
+            "command_exists": resolved_executable is not None,
+            "script_path": script_path,
+            "script_exists": script_exists,
+            "error": None if resolved_executable else RuntimeError(f"LSP command not found: {executable}"),
+        }
 
     def _build_env(self) -> dict[str, str]:
-        env = dict(os.environ)
+        env: dict[str, str] = {}
+        for key in [
+            "PATH",
+            "HOME",
+            "LANG",
+            "LC_ALL",
+            "TMPDIR",
+            "TMP",
+            "TEMP",
+            "SYSTEMROOT",
+            "WINDIR",
+            "PATHEXT",
+            "USERPROFILE",
+            "PYTHONPATH",
+            "LD_LIBRARY_PATH",
+            "VIRTUAL_ENV",
+        ]:
+            value = os.environ.get(key)
+            if value:
+                env[key] = value
         env["PYTHONUNBUFFERED"] = "1"
         return env
 
@@ -397,18 +459,17 @@ class LspClient:
         pylsp_spec = importlib.util.find_spec("pylsp")
         snapshot = {
             "configured_command": self._configured_command or get_settings().lsp.python_command,
-            "resolved_command": list(self._resolved_command),
+            "spawn_argv": list(self._spawn_argv),
             "command": self._command or get_settings().lsp.python_command,
-            "command_exists": bool(self._resolved_command and Path(self._resolved_command[0]).exists()),
+            "executable": self._spawn_debug.get("executable"),
+            "resolved_executable": self._spawn_debug.get("resolved_executable"),
+            "command_exists": bool(self._spawn_debug.get("command_exists")),
+            "script_path": self._spawn_debug.get("script_path"),
+            "script_exists": self._spawn_debug.get("script_exists"),
             "cwd": self._spawn_debug.get("cwd"),
             "workspace_root": self._spawn_debug.get("workspace_root")
             or str(get_settings().lsp.workspace_root.resolve()),
-            "path": os.environ.get("PATH"),
-            "spawn_env_path": self._spawn_debug.get("spawn_env_path"),
-            "spawn_env_pythonpath": self._spawn_debug.get("spawn_env_pythonpath"),
-            "spawn_env_ld_library_path": self._spawn_debug.get("spawn_env_ld_library_path"),
-            "spawn_env_virtual_env": self._spawn_debug.get("spawn_env_virtual_env"),
-            "spawn_env_keys": self._spawn_debug.get("spawn_env_keys", []),
+            "path": self._spawn_debug.get("path") or os.environ.get("PATH"),
             "python_executable": shutil.which("python"),
             "python3_executable": shutil.which("python3"),
             "sys_executable": sys.executable,
@@ -427,6 +488,23 @@ class LspClient:
             snapshot["last_error_type"] = self._spawn_debug.get("last_error_type")
             snapshot["last_error"] = self._spawn_debug.get("last_error")
         return snapshot
+
+    def _detect_script_path(self, parts: list[str]) -> tuple[str | None, bool | None]:
+        if len(parts) < 2:
+            return None, None
+        candidate = parts[1]
+        if not candidate:
+            return None, None
+        looks_like_path = (
+            "/" in candidate
+            or "\\" in candidate
+            or candidate.startswith(".")
+            or Path(candidate).suffix.lower() in {".sh", ".ps1", ".cmd", ".bat", ".py"}
+        )
+        if not looks_like_path:
+            return None, None
+        script_path = str(Path(candidate).expanduser())
+        return script_path, Path(candidate).expanduser().exists()
 
     def resolve_uri_path(self, uri: str) -> Path:
         parsed = urlparse(uri)

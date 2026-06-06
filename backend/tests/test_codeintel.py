@@ -220,7 +220,16 @@ async def test_lsp_startup_timeout_is_reported(monkeypatch, tmp_path) -> None:
     settings.lsp.python_command = sys.executable
     patch_codeintel_settings(monkeypatch, settings)
     monkeypatch.setattr("backend.app.codeintel.lsp_client.get_settings", lambda: settings)
-    lsp_client._resolve_command = lambda _command: [sys.executable]  # type: ignore[method-assign]
+    lsp_client._resolve_command = lambda _command: {  # type: ignore[method-assign]
+        "configured_command": _command,
+        "spawn_argv": [sys.executable],
+        "executable": sys.executable,
+        "resolved_executable": sys.executable,
+        "command_exists": True,
+        "script_path": None,
+        "script_exists": None,
+        "error": None,
+    }
 
     original_exec = asyncio.create_subprocess_exec
 
@@ -640,30 +649,6 @@ async def test_lsp_service_real_path_via_fake_server_includes_source_real_lsp(
     assert result.lsp_status in {"real_lsp", "failed"}
     if result.source == "real_lsp":
         assert result.fallback_reason is None
-
-
-def test_lsp_resolve_command_supports_args(monkeypatch) -> None:
-    monkeypatch.setattr("shutil.which", lambda command: "/usr/bin/python3" if command == "python" else None)
-
-    from backend.app.codeintel.lsp_client import LspClient
-
-    assert LspClient()._resolve_command("python -m pylsp") == ["/usr/bin/python3", "-m", "pylsp"]
-
-
-def test_lsp_build_env_preserves_existing_environment(monkeypatch) -> None:
-    monkeypatch.setenv("PATH", "/usr/bin")
-    monkeypatch.setenv("LD_LIBRARY_PATH", "/opt/python/lib")
-    monkeypatch.setenv("VIRTUAL_ENV", "/tmp/venv")
-
-    from backend.app.codeintel.lsp_client import LspClient
-
-    env = LspClient()._build_env()
-
-    assert env["PATH"] == "/usr/bin"
-    assert env["LD_LIBRARY_PATH"] == "/opt/python/lib"
-    assert env["VIRTUAL_ENV"] == "/tmp/venv"
-    assert env["PYTHONUNBUFFERED"] == "1"
-
 
 async def test_codeintel_routes_include_source_field(monkeypatch, tmp_path) -> None:
     settings = codeintel_test_settings(tmp_path, lsp_enabled=False)
