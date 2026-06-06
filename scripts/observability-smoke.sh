@@ -40,7 +40,11 @@ curl_json() {
 }
 
 command -v curl >/dev/null 2>&1 || fail_or_skip "curl is required"
-[[ -x "${PYTHON}" ]] || fail_or_skip "project venv python is required"
+if [[ "${PYTHON}" == "python" ]]; then
+  command -v python >/dev/null 2>&1 || fail_or_skip "python is required"
+else
+  [[ -x "${PYTHON}" ]] || fail_or_skip "project venv python is required"
+fi
 
 log "checking backend health"
 curl_json /health >"${SMOKE_TMP_DIR}/observability-health.json" || fail_or_skip "backend health is unreachable"
