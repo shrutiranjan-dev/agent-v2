@@ -347,6 +347,41 @@ export type Artifact = {
   created_at: string;
 };
 
+export type FileChange = {
+  id: string;
+  session_id: string;
+  agent_run_id?: string | null;
+  tool_call_id?: string | null;
+  tool_name: string;
+  operation: string;
+  relative_path: string;
+  before_sha256?: string | null;
+  after_sha256?: string | null;
+  before_size_bytes?: number | null;
+  after_size_bytes?: number | null;
+  additions: number;
+  deletions: number;
+  replacement_count: number;
+  backup_path?: string | null;
+  redacted: boolean;
+  redaction_reason?: string | null;
+  revertible: boolean;
+  revert_status: string;
+  reverted_at?: string | null;
+  reverted_by_user_id?: string | null;
+  revert_tool_call_id?: string | null;
+  revert_error?: string | null;
+  metadata: Record<string, unknown>;
+  diff?: string | null;
+  diff_truncated?: boolean;
+  before_content?: string | null;
+  after_content?: string | null;
+  before_content_truncated?: boolean;
+  after_content_truncated?: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
 export type SessionDetail = {
   session: Session;
   messages: Message[];
@@ -476,5 +511,23 @@ export const api = {
   codeSymbols: (query?: string) =>
     request<{ symbols: CodeSymbol[] }>(`/code/symbols?limit=50${query ? `&query=${encodeURIComponent(query)}` : ""}`),
   codeDiagnostics: () => request<{ diagnostics: CodeDiagnostic[] }>("/code/diagnostics?limit=50"),
-  codeMap: () => request<{ code_map: CodeMap }>("/code/map?depth=2&include_symbols=true")
+  codeMap: () => request<{ code_map: CodeMap }>("/code/map?depth=2&include_symbols=true"),
+  fileChanges: (params: { sessionId?: string; runId?: string; path?: string; limit?: number } = {}) => {
+    const search = new URLSearchParams();
+    if (params.sessionId) search.set("session_id", params.sessionId);
+    if (params.runId) search.set("run_id", params.runId);
+    if (params.path) search.set("path", params.path);
+    search.set("limit", String(params.limit ?? 100));
+    const query = search.toString();
+    return request<{ file_changes: FileChange[]; count: number }>(`/file-changes?${query}`);
+  },
+  fileChange: (id: string, includeContent = true) => {
+    const search = new URLSearchParams({ include_content: String(includeContent) });
+    return request<{ file_change: FileChange }>(`/file-changes/${id}?${search.toString()}`);
+  },
+  revertFileChange: (id: string, force = false) =>
+    request<{ file_change: FileChange }>(`/file-changes/${id}/revert`, {
+      method: "POST",
+      body: JSON.stringify({ force })
+    })
 };

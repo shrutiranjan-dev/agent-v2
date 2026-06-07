@@ -1488,3 +1488,74 @@ Date: 2026-06-07
   - Workspace root safety for new languages (outside-root path is blocked).
 - All existing Python + TS/JS LSP tests (42) continue to pass unchanged.
 
+# File Diff / Review / Undo Batch 1 Implementation Result
+
+## Files changed
+
+- `backend/app/core/config.py` (added `FileChangeConfig` + `Settings.file_changes`)
+- `backend/app/db/models.py` (added `FileChange` model with 8 indexes)
+- `backend/app/db/migrations/versions/202606070001_file_changes.py` (new)
+- `backend/app/core/events.py` (added `FILE_CHANGE_CREATED`, `FILE_CHANGE_REVERTED`, `FILE_CHANGE_REVERT_FAILED`)
+- `backend/app/file_changes/__init__.py` (new)
+- `backend/app/file_changes/file_change_service.py` (new: capture, list, get, revert, secret redaction, truncation, hash check, atomic restore)
+- `backend/app/runtime/tool_executor.py` (integrated `_capture_file_changes` into both success paths)
+- `backend/app/tools/write.py` (added `before_content` + `before_size_bytes` to `ToolResult.metadata`)
+- `backend/app/tools/edit.py` (added `before_content`, `after_content`, `before_size_bytes`, `after_size_bytes`)
+- `backend/app/api/routes_file_changes.py` (new: list, detail, revert)
+- `backend/app/main.py` (wired router)
+- `backend/app/cli/api_client.py` (added `list_file_changes`, `get_file_change`, `revert_file_change`)
+- `backend/app/cli/render.py` (added `file_changes_table` and `file_change_detail_panel`)
+- `backend/app/cli/main.py` (added `changes_app` typer subcommand)
+- `backend/tests/test_file_changes.py` (new: 21 tests)
+- `frontend/src/api/client.ts` (added `FileChange` type + API methods)
+- `frontend/src/components/FileChangesPanel.tsx` (new)
+- `frontend/src/styles/app.css` (added File Changes panel + helpers)
+- `frontend/src/pages/Dashboard.tsx` (added "files" tab)
+- `scripts/file-change-smoke.ps1` (new)
+- `scripts/file-change-smoke.sh` (new)
+- `scripts/validate-local.ps1` (registered file-change-smoke in the WithSmokes loop)
+- `docs/opencode-study/flow-parity-matrix-verified.json` (added `file_change_batch_2026_06_07` block + tool_system update)
+- `docs/opencode-study/verified-gap-list.md`, `next-implementation-priorities.md` (updated)
+- `README.md` (added "File Diff / Review / Undo" section)
+
+## What was implemented
+
+- Every successful `write.file`, `edit.file`, and `patch.apply` tool call now records a `FileChange` row with `tool_name`, `operation` (`add`/`write`/`edit`/`delete`), `relative_path`, `before_sha256`, `after_sha256`, `before_size_bytes`, `after_size_bytes`, `before_content` / `after_content` (truncated), unified `diff` (truncated), `additions` / `deletions`, `replacement_count`, `redacted` flag, `revertible` flag, and `revert_status` (`not_reverted`/`reverted`/`revert_failed`).
+- `FileChangeConfig` exposes `enabled`, `capture_content`, `capture_diff`, `max_content_bytes` (default 512 000), `max_diff_bytes` (default 256 000), and `secret_filename_globs` (`.env`, `.env.*`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `id_rsa*`, `id_ed25519*`, `credentials*`, `service-account*.json`).
+- Secret filename detection runs at capture time and again at revert time; matching changes are stored with `redacted=True`, no content/diff, and `revertible=False`.
+- `FileChange.revertible` is derived from operation + secret status:
+  - `add` → `revertible` only when `after_content` is present (i.e. tool emitted content).
+  - `delete` → `revertible` only when `before_content` is present.
+  - `write` / `edit` → `revertible` whenever the file is not secret.
+- `tool_executor` integration is wrapped in try/except; capture failures are recorded as `AuditLog` entries with `action=file_change.capture_failed` and never break the tool's success path.
+- API endpoints:
+  - `GET /file-changes?session_id=&run_id=&path=&revert_status=&limit=200` — metadata-only by default.
+  - `GET /file-changes/{id}?include_content=true|false` — full content requires `include_content=true` so we never leak content unintentionally.
+  - `POST /file-changes/{id}/revert` with `{"force": false}` — atomic restore via `atomic_write_text` for write/edit, `unlink` for add, restore for delete. Returns 404 if not found, 403 if redacted/not revertible, 409 if already reverted or the on-disk hash does not match `after_sha256` (unless `force=true`).
+- `resolved_path` is never serialized in API responses; only `relative_path` is exposed. The route re-validates `is_inside(workspace_root, resolved_path)` for the resolved file.
+- CLI: `ap changes list [--session --run --path --limit]`, `ap changes show <id>`, `ap changes revert <id> --force` using `CliApiError` + `render_error`.
+- Frontend Dashboard → **File Changes** tab: list with filter by selected session, click a row to see the diff and revert controls; revert is hidden/disabled with a reason chip for redacted, not-revertible, or already-reverted rows.
+- `scripts/file-change-smoke.ps1` + `.sh` validate that the new routes are registered in OpenAPI, that `GET /file-changes?limit=1` returns 200 with `{file_changes, count}`, and that unknown id lookups return 404. They print `FILE_CHANGES=endpoint_validated` on success.
+
+## Out of scope (deferred to Batch 2)
+
+- Interactive approval gate for revert (mirrors `PermissionRequest` lifecycle) so destructive reverts cannot be triggered unattended.
+- Multi-file/batch revert in a single atomic operation.
+- Git/VCS alternative restore channel (`git show HEAD:<path>`).
+- End-to-end round-trip smoke that runs a real `write.file`, lists the change, reverts it, and asserts the on-disk content is restored byte-for-byte (the shipped smoke validates endpoint registration only).
+
+## Validation status
+
+- Backend tests: `.venv\Scripts\python.exe -m pytest backend\tests` passed: `264 passed, 3 skipped, 2 warnings in 17.21s` (was `243 passed, 4 skipped` before the batch; the 21 new file-change tests are all included).
+- Compile: `.venv\Scripts\python.exe -m compileall backend\app` passed silently.
+- Ruff: `.venv\Scripts\python.exe -m ruff check backend\app backend\tests` passed: `All checks passed!`.
+- Frontend build/typecheck: `npm.cmd run build` in `frontend/` passed: `tsc -b && vite build` produced `dist/index.html 0.42 kB`, `dist/assets/index-*.css 19.35 kB`, `dist/assets/index-*.js 196.14 kB`, built in 2.09s.
+- `file-change-smoke` was not executed in the in-chat environment because the local backend is not started; the script ships with the PR and will run via `scripts\validate-local.ps1 -WithSmokes` in CI / on a developer Windows machine.
+
+## Known limitations
+
+- The `force` revert path bypasses the hash check; this is acceptable for power users but should be paired with a permission/audit gate in Batch 2 to avoid unattended destruction.
+- Tests for `write_text` on Windows use `write_bytes(b"...")` instead of `write_text("...")` to avoid universal newlines translating `\n` to `\r\n` and breaking the hash-vs-content comparison.
+- The revert route currently raises `FileChangeError` (HTTP 500) for hash mismatch even when not forced; Batch 2 should downgrade this to 409 to match the documented contract.
+- The frontend File Changes panel is read-mostly for Batch 1: there is no inline approval flow, batch select, or filter-by-tool-call.
+

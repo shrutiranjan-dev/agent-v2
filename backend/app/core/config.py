@@ -244,6 +244,32 @@ class BootstrapConfig(BaseModel):
     user_email: str = "local-user@example.local"
 
 
+class FileChangeConfig(BaseModel):
+    enabled: bool = True
+    capture_content: bool = True
+    capture_diff: bool = True
+    max_content_bytes: int = Field(default=512_000, ge=1024)
+    max_diff_bytes: int = Field(default=256_000, ge=1024)
+    secret_filename_globs: list[str] = Field(
+        default_factory=lambda: [
+            ".env",
+            ".env.*",
+            "*.pem",
+            "*.key",
+            "*.p12",
+            "*.pfx",
+            "id_rsa",
+            "id_rsa.*",
+            "id_ed25519",
+            "id_ed25519.*",
+            "credentials",
+            "credentials.*",
+            "*credentials*",
+            "service-account*.json",
+        ]
+    )
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -270,6 +296,7 @@ class Settings(BaseSettings):
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     runtime: RuntimeLimitsConfig = Field(default_factory=RuntimeLimitsConfig)
     bootstrap: BootstrapConfig = Field(default_factory=BootstrapConfig)
+    file_changes: FileChangeConfig = Field(default_factory=FileChangeConfig)
 
     app_env_override: str | None = Field(default=None, validation_alias=AliasChoices("APP_ENV", "AP_ENV"))
     api_host_override: str | None = Field(default=None, validation_alias=AliasChoices("AP_API_HOST", "API_HOST"))

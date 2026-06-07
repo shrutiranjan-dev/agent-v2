@@ -1,9 +1,9 @@
 # Next Implementation Priorities
 
-Audit commit: `8d63be8`
-Latest batch: `P0 CI + CLI/TUI release hardening` (DONE â€” see implementation-roadmap.md and the latest commit for the resolution).
-Latest local policy: `Make Windows PowerShell the primary local workflow` (DONE â€” see [`docs/windows-shell-policy.md`](../windows-shell-policy.md), [`docs/codex-windows-execution.md`](../codex-windows-execution.md), and the `validate-local.ps1` summary in this audit for the new passed/failed/skipped reporting).
-Latest smoke reliability: `Windows Smoke Reliability Batch` (DONE â€” see [`docs/ci.md`](../ci.md) "Smoke Result Semantics"; `validate-local.ps1 -WithSmokes` now reports `passed=N failed=0 skipped=M warned=K`, queue-worker stale heartbeat is WARN, mcp-plugin and permission-resume are SKIP when prerequisites are missing, and the `SMOKE_RESULT=...` marker protocol is honoured by all PowerShell smokes). `-RequireOptionalSmokes` is the opt-in for stricter handling: it promotes optional `SKIP`/`FAIL` to a required `FAIL` and exits non-zero on any promotion; without the flag the default validation remains non-fatal for optional skips/fails.
+Audit commit: `8d63be8` (post-audit head will be updated after the next push)
+Latest batch: `File Diff/Review/Undo Batch 1` (DONE — see implementation-roadmap.md and the new `file_change_batch_2026_06_07` block in `flow-parity-matrix-verified.json` for the scope, validations, and explicit out-of-scope items).
+Latest local policy: `Make Windows PowerShell the primary local workflow` (DONE — see [`docs/windows-shell-policy.md`](../windows-shell-policy.md), [`docs/codex-windows-execution.md`](../codex-windows-execution.md), and the `validate-local.ps1` summary in this audit for the new passed/failed/skipped reporting).
+Latest smoke reliability: `Windows Smoke Reliability Batch` (DONE — see [`docs/ci.md`](../ci.md) "Smoke Result Semantics"; `validate-local.ps1 -WithSmokes` now reports `passed=N failed=0 skipped=M warned=K`, queue-worker stale heartbeat is WARN, mcp-plugin and permission-resume are SKIP when prerequisites are missing, and the `SMOKE_RESULT=...` marker protocol is honoured by all PowerShell smokes). The new `file-change-smoke` joins the same loop and prints `FILE_CHANGES=endpoint_validated` when the registered routes return their expected shapes.
 Latest LSP progress: `Real LSP CI follow-through` (workflow added, but current status reverted to `REAL_LSP_CI_VALIDATED` after repo-local verification found CI failures on commits 2564c64 and ed13d13).
 
 ## 1. Restore Green CI
@@ -193,3 +193,23 @@ Acceptance:
 3. No default CI path requires Ollama generation.
 
 Expected parity impact: +2 to +4 points.
+
+## 11. File Diff / Review / Undo — Batch 2
+
+Why: Batch 1 captures and reverts individual file changes durably, but interactive approval, multi-file revert, and a Git/VCS fallback channel are still missing.
+
+Scope (Batch 2):
+
+1. Revert approval gate that respects the existing permission policy (mirrors `PermissionRequest` lifecycle) so destructive reverts cannot be triggered by an unattended run.
+2. Batch revert API + UI: revert N selected changes in a single audited operation, with a single atomic restore per file and a single `AuditLog` action.
+3. Git/VCS integration as an alternative restore channel when a workspace is inside a Git repository (read `HEAD` snapshot via `git show HEAD:<path>`) — optional and capability-detected, not required.
+4. End-to-end smoke that runs a real `write.file` and `edit.file` against a live backend, polls `/file-changes`, reverts, and asserts the file is restored byte-for-byte.
+
+Acceptance:
+
+1. Revert is permission-aware and produces an `AuditLog` entry with the user/tool that triggered it.
+2. Multi-file revert rolls back atomically and surfaces a partial-failure report if any file cannot be restored.
+3. When the workspace is a Git repo, the revert endpoint can use `git show HEAD:<path>` as a secondary fallback if `before_content` is missing or out of date.
+4. `file-change-smoke` covers the full round-trip path (create change, list, revert, verify) and prints `FILE_CHANGES=round_trip_validated` only when the on-disk content matches the original after revert.
+
+Expected parity impact: +3 to +5 points.

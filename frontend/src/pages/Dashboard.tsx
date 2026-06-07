@@ -6,8 +6,9 @@ import {
   Box,
   Cpu,
   Database,
-  FileCode2,
   FileClock,
+  FileCode2,
+  FileEdit,
   Loader2,
   MessageCircle,
   MessageSquare,
@@ -27,6 +28,7 @@ import {
   Artifact,
   CodeDiagnostic,
   CodeSymbol,
+  FileChange,
   HumanInputRequest,
   McpServer,
   McpTool,
@@ -42,6 +44,7 @@ import {
 } from "../api/client";
 import { SessionEventSocket, SocketStatus } from "../api/sessionSocket";
 import { EventStream } from "../components/EventStream";
+import { FileChangesPanel } from "../components/FileChangesPanel";
 import { HumanInputPrompt } from "../components/HumanInputPrompt";
 import { MessageList } from "../components/MessageList";
 import { PermissionPrompt } from "../components/PermissionPrompt";
@@ -49,7 +52,7 @@ import { StatusPill } from "../components/StatusPill";
 import { ToolCallTimeline } from "../components/ToolCallTimeline";
 import { usePolling } from "../stores/usePolling";
 
-type Tab = "chat" | "sessions" | "agents" | "tools" | "permissions" | "runtime" | "models" | "code" | "extensions" | "artifacts" | "events";
+type Tab = "chat" | "sessions" | "agents" | "tools" | "permissions" | "runtime" | "models" | "code" | "extensions" | "artifacts" | "files" | "events";
 
 const tabs: Array<{ id: Tab; label: string; icon: typeof Activity }> = [
   { id: "chat", label: "Chat", icon: MessageCircle },
@@ -62,6 +65,7 @@ const tabs: Array<{ id: Tab; label: string; icon: typeof Activity }> = [
   { id: "code", label: "Code", icon: FileCode2 },
   { id: "extensions", label: "Extensions", icon: Plug },
   { id: "artifacts", label: "Artifacts", icon: Box },
+  { id: "files", label: "File Changes", icon: FileEdit },
   { id: "events", label: "Events", icon: FileClock }
 ];
 
@@ -96,6 +100,10 @@ export function Dashboard() {
     15000
   );
   const events = usePolling(api.events, 5000);
+  const fileChanges = usePolling(
+    () => api.fileChanges({ sessionId: selectedSessionId, limit: 200 }),
+    6000
+  );
   const queueStats = usePolling(api.queueStats, 5000);
   const queueJobs = usePolling(api.queueJobs, 5000);
   const queueWorkers = usePolling(api.queueWorkers, 5000);
@@ -1001,6 +1009,14 @@ export function Dashboard() {
             body: artifact.session_id ? `session ${artifact.session_id}` : "No session link recorded",
             meta: [String(artifact.content_type ?? "unknown"), formatBytes(artifact.size_bytes)]
           }))} />
+        )}
+
+        {active === "files" && (
+          <FileChangesPanel
+            fileChanges={fileChanges.data?.file_changes ?? []}
+            error={fileChanges.error}
+            onRefresh={() => void fileChanges.refresh()}
+          />
         )}
 
         {active === "events" && (

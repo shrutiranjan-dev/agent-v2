@@ -1,10 +1,10 @@
 {
-  "audit_date": "2026-06-06",
+  "audit_date": "2026-06-07",
   "audited_commit": "8d63be8",
-  "post_audit_batch": "P0 CI + CLI/TUI release hardening",
+  "post_audit_batch": "File Diff/Review/Undo Batch 1 (post P0 CI + CLI/TUI release hardening)",
   "reference_source": "external/opencode-source",
-  "verified_overall_percent": 70,
-  "claimed_overall_percent": 74,
+  "verified_overall_percent": 72,
+  "claimed_overall_percent": 76,
   "overall_status": "PARTIAL_WITH_CI_BLOCKER",
   "ci_status": {
     "repo_hygiene": "PASS",
@@ -106,18 +106,26 @@
       "id": "tool_system",
       "name": "Tool system",
       "claimed_percent": null,
-      "verified_percent": 84,
+      "verified_percent": 88,
       "status": "STRONG",
       "confidence": "HIGH",
       "evidence": [
         "Read/write/edit/patch/grep/glob/bash/todo/question/codeintel tools exist",
         "Tool executor applies permission policy and preview metadata",
-        "Tool registry, parity, bash safety, and codeintel tests passed"
+        "Tool registry, parity, bash safety, and codeintel tests passed",
+        "FileChange model + migration 202606070001_file_changes capture every successful write.file / edit.file / patch.apply with relative path, before/after SHA-256, sizes, unified diff, additions/deletions, and revert metadata",
+        "Secret filename detection (fnmatch against .env, .env.*, *.pem, *.key, *.p12, *.pfx, id_rsa*, id_ed25519*, credentials*, service-account*.json) sets redacted=True, omits content/diff, and marks revertible=False",
+        "Content and diff truncation enforced via max_content_bytes / max_diff_bytes",
+        "API routes /file-changes (list), /file-changes/{id} (detail with include_content flag), /file-changes/{id}/revert (force flag) registered and exposed in OpenAPI",
+        "Revert restores via atomic_write_text for write/edit, unlink for add, restore for delete; hash mismatch returns 409 unless force=true; outside-workspace or secret files refused",
+        "Frontend FileChangesPanel (Dashboard File Changes tab) lists changes, shows diffs, and triggers revert with reason chips for non-revertible rows",
+        "CLI subcommand `ap changes list|show|revert` wired through api_client",
+        "21 new file-change tests passed; total backend suite 264 passed, 3 skipped"
       ],
       "gaps": [
-        "Full preview/diff parity for every mutation path not proven",
         "OpenCode-level tool UX and retry history incomplete",
-        "Broader tool ecosystem parity not proven"
+        "Broader tool ecosystem parity not proven",
+        "End-to-end revert UX in real sessions not yet smoke-tested end-to-end; smoke validates endpoint registration only"
       ]
     },
     {
@@ -294,5 +302,40 @@
         "TypeScript/JS LSP and broader language-server coverage are still future work"
       ]
     }
-  ]
+  ],
+  "file_change_batch_2026_06_07": {
+    "batch": "File Diff/Review/Undo Batch 1",
+    "scope": "Track and revert write.file, edit.file, and patch.apply via durable FileChange rows",
+    "scope_excludes": [
+      "Interactive approval flow for revert (deferred to Batch 2)",
+      "Batch/partial revert of multiple changes at once (deferred to Batch 2)",
+      "Git/VCS integration as an alternative restore channel (deferred to Batch 2)"
+    ],
+    "delivered": [
+      "backend/app/core/config.py: FileChangeConfig (enabled, capture_content, capture_diff, max_content_bytes, max_diff_bytes, secret_filename_globs)",
+      "backend/app/db/models.py: FileChange model (UUID, FKs to org/project/workspace/session/agent_run/tool_call/user, tool_name, operation, relative_path, before/after sha, sizes, before/after content, diff, additions/deletions, backup_path, redacted, revertible, revert_status, revert metadata, metadata JSONB)",
+      "backend/app/db/migrations/versions/202606070001_file_changes.py: file_changes table + 8 indexes",
+      "backend/app/core/events.py: FILE_CHANGE_CREATED, FILE_CHANGE_REVERTED, FILE_CHANGE_REVERT_FAILED",
+      "backend/app/file_changes/file_change_service.py: capture (write/edit/patch), list, get, revert, secret redaction, content/diff truncation, hash-check, atomic restore, FakeAsyncSession support",
+      "backend/app/runtime/tool_executor.py: _capture_file_changes integrated into both execute() and execute_approved_call() success paths; capture failures wrapped as AuditLog entries with action=file_change.capture_failed",
+      "backend/app/tools/write.py + edit.py: emit before_content/after_content in result metadata for capture",
+      "backend/app/api/routes_file_changes.py: list, detail (include_content flag), revert (force flag)",
+      "backend/app/cli/api_client.py + render.py + main.py: list_file_changes, get_file_change, revert_file_change + 'ap changes list|show|revert' subcommand",
+      "frontend/src/api/client.ts: FileChange type + fileChanges/fileChange/revertFileChange methods",
+      "frontend/src/components/FileChangesPanel.tsx + frontend/src/styles/app.css: list/detail panel with revert controls",
+      "frontend/src/pages/Dashboard.tsx: new 'files' tab wired to selected session",
+      "backend/tests/test_file_changes.py: 21 tests covering capture/list/revert/secret/hash/route",
+      "scripts/file-change-smoke.ps1 + file-change-smoke.sh: endpoint-registration + 200/404 round-trip smoke (FILE_CHANGES=endpoint_validated)",
+      "scripts/validate-local.ps1: file-change-smoke added to WithSmokes loop"
+    ],
+    "validations": {
+      "compileall": "PASS",
+      "ruff_check": "PASS",
+      "pytest": "PASS: 264 passed, 3 skipped, 2 warnings in ~17s (was 243/4 before batch)",
+      "npm_run_build": "PASS (frontend tsc + vite)",
+      "docker_compose_config": "NOT_RUN this batch (no compose change)",
+      "file_change_smoke": "NOT_RUN here because the local backend is not started in the in-chat environment; smoke ships with the PR and runs in CI / Windows-first validate-local.ps1 -WithSmokes"
+    },
+    "ci_status": "PENDING_PUSH: truth gate requires the new commit to be pushed and the GitHub Actions checks to come back green before any *_CI_VALIDATED marker is added"
+  }
 }

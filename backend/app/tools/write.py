@@ -88,11 +88,16 @@ class WriteFileTool(BaseTool):
             )
 
         backup_path: str | None = None
+        before_content: str | None = None
         if existed and input_data.backup:
             suffix = datetime.now(UTC).strftime("%Y%m%d%H%M%S%f")
             backup = target.with_name(f"{target.name}.{suffix}.bak")
             backup.write_bytes(target.read_bytes())
             backup_path = str(backup)
+            try:
+                before_content = target.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                before_content = None
 
         atomic_write_text(target, input_data.content)
         digest = content_sha256(input_data.content)
@@ -116,5 +121,7 @@ class WriteFileTool(BaseTool):
                 "created": not existed,
                 "overwritten": existed,
                 "previous_sha256": before_hash,
+                "before_content": before_content,
+                "before_size_bytes": len(before_content.encode("utf-8")) if before_content is not None else None,
             },
         )

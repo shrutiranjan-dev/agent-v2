@@ -277,6 +277,43 @@ Behavior:
 - When `AP_LSP_ENABLED=true`, the backend starts a real stdio JSON-RPC language server and uses it for file-based symbols, definitions, references, and diagnostics when the server is available.
 - If the configured server is missing, times out, or fails, health reports the failure and static fallback remains available instead of pretending LSP succeeded.
 
+## File Diff / Review / Undo
+
+Every successful `write.file`, `edit.file`, and `patch.apply` tool call is captured
+as a `FileChange` row in the database. The Dashboard exposes a **File Changes**
+tab where every change can be inspected, diffed, and (when safe) reverted.
+
+Environment variables (defaults shown; override on Windows with
+`$env:AP_FILE_CHANGES_X = "value"` before `docker compose up -d --build backend`):
+
+```bash
+AP_FILE_CHANGES_ENABLED=true
+AP_FILE_CHANGES_CAPTURE_CONTENT=true
+AP_FILE_CHANGES_CAPTURE_DIFF=true
+AP_FILE_CHANGES_MAX_CONTENT_BYTES=512000
+AP_FILE_CHANGES_MAX_DIFF_BYTES=256000
+```
+
+Behavior:
+
+- Captures record tool name, operation (`add` / `write` / `edit` / `delete`),
+  relative path, before/after SHA-256, sizes, additions/deletions,
+  `before_content` / `after_content` (truncated to `max_content_bytes`),
+  unified diff (truncated to `max_diff_bytes`), and revert metadata.
+- Secret filenames matching `.env`, `.env.*`, `*.pem`, `*.key`, `*.p12`,
+  `*.pfx`, `id_rsa*`, `id_ed25519*`, `credentials*`, `service-account*.json`
+  are stored with `redacted=True`, no content, and `revertible=False`.
+- API endpoints (mounted under `/file-changes`):
+  - `GET /file-changes?session_id=&run_id=&path=&revert_status=&limit=200`
+  - `GET /file-changes/{id}?include_content=true` (default metadata-only)
+  - `POST /file-changes/{id}/revert` with `{"force": false}` for atomic
+    restoration. Returns 404 if not found, 403 if redacted/not revertible,
+    409 if already reverted or the on-disk hash does not match
+    `after_sha256` (unless `force=true`).
+- CLI: `ap changes list`, `ap changes show <id>`, `ap changes revert <id> --force`.
+- Frontend: Dashboard → **File Changes** tab; click a row to see the diff and
+  trigger revert.
+
 Every `/code/...` response and every `code.*` tool result now carries these honesty fields so consumers can never mistake a fallback for a real-LSP result:
 
 - `source`: `real_lsp` or `static_fallback`

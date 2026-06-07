@@ -13,6 +13,8 @@ from backend.app.cli.render import (
     agents_table,
     artifacts_table,
     events_table,
+    file_change_detail_panel,
+    file_changes_table,
     queue_jobs_table,
     render_error,
     render_health,
@@ -28,9 +30,11 @@ app = typer.Typer(help="Local Agent Platform CLI")
 sessions_app = typer.Typer(help="Session commands")
 queue_app = typer.Typer(help="Queue commands")
 artifacts_app = typer.Typer(help="Artifact commands")
+changes_app = typer.Typer(help="File change commands")
 app.add_typer(sessions_app, name="sessions")
 app.add_typer(queue_app, name="queue")
 app.add_typer(artifacts_app, name="artifacts")
+app.add_typer(changes_app, name="changes")
 console = Console()
 
 
@@ -194,6 +198,60 @@ def artifacts_list(session: str | None = typer.Option(None, "--session", "-s")) 
     """List artifacts, optionally filtered by session id."""
     with _client() as client:
         console.print(artifacts_table(client.list_artifacts(session_id=session)))
+
+
+@changes_app.command("list")
+def changes_list(
+    session: str | None = typer.Option(None, "--session", "-s", help="Filter by session id."),
+    run: str | None = typer.Option(None, "--run", "-r", help="Filter by agent run id."),
+    path: str | None = typer.Option(None, "--path", "-p", help="Filter by exact relative path."),
+    limit: int = typer.Option(100, "--limit", "-l", help="Maximum number of file changes to display."),
+) -> None:
+    """List durable file changes recorded for write/edit/patch tool calls."""
+    with _client() as client:
+        rows = client.list_file_changes(session_id=session, run_id=run, path=path, limit=limit)
+        if not rows:
+            console.print("[yellow]No file changes recorded yet.[/yellow]")
+            return
+        console.print(file_changes_table(rows))
+
+
+@changes_app.command("show")
+def changes_show(file_change_id: str) -> None:
+    """Show a single file change with its diff."""
+    with _client() as client:
+        try:
+            row = client.get_file_change(file_change_id, include_content=True)
+        except CliApiError as exc:
+            console.print(render_error(exc))
+            raise typer.Exit(code=1) from exc
+        if not row:
+            console.print(f"[red]File change {file_change_id} not found.[/red]")
+            raise typer.Exit(code=1)
+        console.print(file_change_detail_panel(row))
+
+
+@changes_app.command("revert")
+def changes_revert(
+    file_change_id: str = typer.Argument(..., help="File change id to revert."),
+    force: bool = typer.Option(False, "--force", help="Allow revert for secret-like files and skip hash check."),
+) -> None:
+    """Revert a recorded file change, restoring the prior content when possible."""
+    with _client() as client:
+        try:
+            row = client.revert_file_change(file_change_id, force=force)
+        except CliApiError as exc:
+            console.print(render_error(exc))
+            raise typer.Exit(code=1) from exc
+        if not row:
+            console.print(f"[red]File change {file_change_id} not found.[/red]")
+            raise typer.Exit(code=1)
+        console.print(file_change_detail_panel(row))
+        if row.get("revert_status") != "reverted":
+            console.print(
+                f"[yellow]Revert reported status={row.get('revert_status')}; "
+                f"check revert_error for details.[/yellow]"
+            )
 
 
 @app.command()

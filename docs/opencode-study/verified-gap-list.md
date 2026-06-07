@@ -1,8 +1,8 @@
 # Verified OpenCode Parity Gap List
 
-Audit commit: `8d63be8`
-Verified overall parity: 72% (Code Intelligence and LSP raised to 86% with both fake-LSP path validation AND live real-pylsp 1.14.0 validation in this audit; status is now `REAL_LSP_VALIDATED` for the Python LSP path)
-Latest batch: `P0 CI + CLI/TUI release hardening` (DONE; see implementation-roadmap.md and the latest commit for the resolution).
+Audit commit: `8d63be8` (post-audit head will be updated after the next push)
+Verified overall parity: 72% (Tool system category raised to 88% by the File Diff/Review/Undo batch; verified overall moved from 70% to 72% on the strength of durable file-change capture, secret redaction, and atomic revert)
+Latest batch: `File Diff/Review/Undo Batch 1` (DONE; see `implementation-roadmap.md` and the new `file_change_batch_2026_06_07` block in `flow-parity-matrix-verified.json` for the scope and validations).
 Latest local policy: `Make Windows PowerShell the primary local workflow` (DONE; see [`docs/windows-shell-policy.md`](../windows-shell-policy.md) and [`docs/codex-windows-execution.md`](../codex-windows-execution.md) for the project-wide rule, and the `validate-local.ps1` summary in this audit for the new passed/failed/skipped reporting).
 Latest smoke reliability: `Windows Smoke Reliability Batch` (DONE; see `validate-local.ps1 -WithSmokes` now reports `passed=N failed=0 skipped=M warned=K` with no misleading optional failures; queue-worker stale heartbeat is WARN when Docker backend-worker is healthy, mcp-plugin is SKIP when `MCP_REAL_SERVER` is missing, permission-resume is SKIP without `AP_ENABLE_TEST_ENDPOINTS=true`, and the `SMOKE_RESULT=...` marker protocol is documented in [`docs/ci.md`](../ci.md) under "Smoke Result Semantics"). `-RequireOptionalSmokes` now correctly promotes optional `SKIP` and `FAIL` to a required `FAIL` (exits non-zero only with the flag, default remains non-fatal) and the "promoted to required" annotation is scoped per smoke (does not leak across iterations).
 
@@ -53,7 +53,7 @@ Latest smoke reliability: `Windows Smoke Reliability Batch` (DONE; see `validate
 2. Web dashboard build passes, but frontend unit/e2e coverage, accessibility, keyboard behavior, and OpenCode-level interaction polish are not proven.
 3. Memory and compaction work in tests, but live dependency health shows Qdrant memory store disabled and embeddings inactive.
 4. Agent registry is functional, but richer subagent orchestration, user-configurable routing, and lifecycle observability are incomplete.
-5. Tool execution is strong, but complete preview/diff parity and richer tool history/retry UX are still incomplete.
+5. Tool execution is strong, but complete preview/diff parity and richer tool history/retry UX are still incomplete. **IMPROVED** — File Diff/Review/Undo Batch 1 captures every successful `write.file` / `edit.file` / `patch.apply` as a durable `FileChange` row with relative path, before/after SHA-256, sizes, unified diff, additions/deletions, redacted status, and revert metadata. The new `/file-changes`, `/file-changes/{id}`, and `/file-changes/{id}/revert` API endpoints and the Dashboard **File Changes** tab expose a complete review/undo flow. Out-of-scope for Batch 1: interactive approval gate, batch/multi-file revert, and a Git/VCS alternative restore channel.
 
 ## P3 Evidence Gaps
 

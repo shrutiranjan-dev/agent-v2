@@ -337,6 +337,9 @@ Optional Windows smokes (skip cleanly when prerequisites are missing):
 - `permission-resume-smoke.ps1` (SKIP unless `AP_ENABLE_TEST_ENDPOINTS=true`,
   an Ollama model is available, and active worker heartbeats exist; the
   full e2e flow needs Bash)
+- `file-change-smoke.ps1` (validates `/file-changes` route registration, the
+  200/404 round-trip, and prints `FILE_CHANGES=endpoint_validated`; SKIP if
+  the backend is not up; full end-to-end revert round-trip is Batch 2 work)
 
 Why some smokes skip without `AP_ENABLE_TEST_ENDPOINTS=true`:
 

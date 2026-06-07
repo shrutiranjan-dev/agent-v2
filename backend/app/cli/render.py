@@ -5,6 +5,7 @@ from typing import Any
 from rich.console import Console, Group, RenderableType
 from rich.markdown import Markdown
 from rich.panel import Panel
+from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
 
@@ -139,6 +140,58 @@ def artifacts_table(artifacts: list[dict[str, Any]]) -> Table:
             str(artifact.get("created_at", "")),
         )
     return table
+
+
+def file_changes_table(changes: list[dict[str, Any]]) -> Table:
+    table = Table(title="File Changes")
+    table.add_column("ID", style="cyan", no_wrap=True)
+    table.add_column("Tool")
+    table.add_column("Op", style="bold")
+    table.add_column("Path", style="green")
+    table.add_column("Revert")
+    table.add_column("Redacted", justify="center")
+    table.add_column("Created")
+    for change in changes:
+        revert_status = str(change.get("revert_status", ""))
+        if revert_status == "reverted":
+            revert_label = "reverted"
+        elif revert_status == "revert_failed":
+            revert_label = "failed"
+        elif not change.get("revertible", True):
+            revert_label = "not_revertible"
+        else:
+            revert_label = "available"
+        redacted = "yes" if change.get("redacted") else "no"
+        table.add_row(
+            str(change.get("id", "")),
+            str(change.get("tool_name", "")),
+            str(change.get("operation", "")),
+            str(change.get("relative_path", "")),
+            revert_label,
+            redacted,
+            str(change.get("created_at", "")),
+        )
+    return table
+
+
+def file_change_detail_panel(change: dict[str, Any]) -> Panel:
+    body = Text()
+    body.append(f"ID: {change.get('id', '')}\n", style="cyan")
+    body.append(f"Tool: {change.get('tool_name', '')}  Op: {change.get('operation', '')}\n", style="bold")
+    body.append(f"Path: {change.get('relative_path', '')}\n", style="green")
+    body.append(f"Revert: {change.get('revert_status', '')}  Redacted: {change.get('redacted', False)}\n")
+    if change.get("redaction_reason"):
+        body.append(f"Redaction: {change.get('redaction_reason', '')}\n", style="yellow")
+    body.append(f"Before: {change.get('before_sha256') or '-'}\n")
+    body.append(f"After:  {change.get('after_sha256') or '-'}\n")
+    body.append(f"Additions: {change.get('additions', 0)}  Deletions: {change.get('deletions', 0)}  "
+                f"Replacements: {change.get('replacement_count', 0)}\n")
+    if change.get("diff"):
+        return Group(
+            Panel(body, title="File Change", border_style="cyan"),
+            Panel(Syntax(str(change.get("diff")), "diff", word_wrap=True), title="Diff", border_style="yellow"),
+        )
+    return Panel(body, title="File Change", border_style="cyan")
 
 
 def render_error(error: Exception) -> Panel:

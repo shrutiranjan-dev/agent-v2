@@ -143,5 +143,9 @@ class EditFileTool(BaseTool):
                 "before_sha256": before_hash,
                 "after_sha256": after_hash,
                 "diff": diff,
+                "before_content": before,
+                "after_content": None if input_data.dry_run else after,
+                "before_size_bytes": len(before.encode("utf-8")),
+                "after_size_bytes": None if input_data.dry_run else len(after.encode("utf-8")),
             },
         )

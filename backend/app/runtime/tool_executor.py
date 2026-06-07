@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 from uuid import UUID
 
@@ -11,6 +12,11 @@ from backend.app.core.config import get_settings
 from backend.app.core.events import EventType
 from backend.app.core.redaction import redact_data, redact_text
 from backend.app.db.models import AuditLog, Session, ToolCall
+from backend.app.file_changes.file_change_service import (
+    FileChangeContext,
+    capture_from_tool_call,
+    serialize_file_change,
+)
 from backend.app.permissions.models import PermissionAction, PermissionRequestCreate
 from backend.app.permissions.policy import evaluate_default_policy
 from backend.app.permissions.service import permission_service
@@ -476,7 +482,22 @@ class ToolExecutor:
             return ToolExecutionOutcome(status="failed", tool_call=call, output=call.output_json, error=error)
 
         await self._apply_success_side_effects(db, tool_name=tool_name, session_id=session_id, result=result)
+        file_change_ids = await self._capture_file_changes(
+            db,
+            organization_id=organization_id,
+            project_id=project_id,
+            workspace_id=workspace_id,
+            session_id=session_id,
+            agent_run_id=agent_run_id,
+            tool_call_id=call.id,
+            workspace_root=workspace_root,
+            tool_name=tool_name,
+            input_json=input_json,
+            result=result,
+        )
         payload = redact_data(result.model_dump(mode="json"))
+        if file_change_ids:
+            payload = {**payload, "file_change_ids": file_change_ids}
         call.status = "completed"
         call.output_json = payload
         call.completed_at = datetime.now(UTC)
@@ -589,7 +610,22 @@ class ToolExecutor:
             )
 
         await self._apply_success_side_effects(db, tool_name=tool_name, session_id=tool_call.session_id, result=result)
+        file_change_ids = await self._capture_file_changes(
+            db,
+            organization_id=tool_call.organization_id,
+            project_id=tool_call.project_id,
+            workspace_id=tool_call.workspace_id,
+            session_id=tool_call.session_id,
+            agent_run_id=tool_call.agent_run_id,
+            tool_call_id=tool_call.id,
+            workspace_root=get_settings().workspace_root,
+            tool_name=tool_name,
+            input_json=tool_call.input_json,
+            result=result,
+        )
         payload = redact_data(result.model_dump(mode="json"))
+        if file_change_ids:
+            payload = {**payload, "file_change_ids": file_change_ids}
         tool_call.status = "completed"
         tool_call.output_json = payload
         tool_call.completed_at = datetime.now(UTC)
@@ -707,6 +743,84 @@ class ToolExecutor:
         if not started_at or not completed_at:
             return None
         return max(int((completed_at - started_at).total_seconds() * 1000), 0)
+
+    async def _capture_file_changes(
+        self,
+        db: AsyncSession,
+        *,
+        organization_id: UUID,
+        project_id: UUID,
+        workspace_id: UUID,
+        session_id: UUID,
+        agent_run_id: UUID | None,
+        tool_call_id: UUID,
+        workspace_root: Path,
+        tool_name: str,
+        input_json: dict[str, Any],
+        result,
+    ) -> list[str]:
+        try:
+            result_output = result.output if isinstance(result.output, dict) else {}
+            result_metadata = result.metadata if isinstance(result.metadata, dict) else {}
+            ctx = FileChangeContext(
+                organization_id=organization_id,
+                project_id=project_id,
+                workspace_id=workspace_id,
+                session_id=session_id,
+                agent_run_id=agent_run_id,
+                tool_call_id=tool_call_id,
+                workspace_root=workspace_root,
+            )
+            rows = await capture_from_tool_call(
+                db,
+                ctx=ctx,
+                tool_name=tool_name,
+                input_json=input_json,
+                result_output=result_output,
+                result_metadata=result_metadata,
+            )
+        except Exception as exc:
+            db.add(
+                AuditLog(
+                    organization_id=organization_id,
+                    project_id=project_id,
+                    workspace_id=workspace_id,
+                    action="file_change.capture_failed",
+                    resource_type="tool_call",
+                    resource_id=str(tool_call_id),
+                    status="failed",
+                    metadata_json=redact_data({"tool": tool_name, "error": redact_text(str(exc))}),
+                )
+            )
+            return []
+        if not rows:
+            return []
+        serialized: list[dict[str, Any]] = []
+        for row in rows:
+            try:
+                serialized.append(serialize_file_change(row, include_content=False))
+            except Exception:
+                serialized.append({"id": str(row.id)})
+        try:
+            await event_bus.publish(
+                db,
+                organization_id=organization_id,
+                project_id=project_id,
+                workspace_id=workspace_id,
+                session_id=session_id,
+                agent_run_id=agent_run_id,
+                tool_call_id=tool_call_id,
+                event_type=EventType.TOOL_CALL_COMPLETED,
+                payload={
+                    "id": str(tool_call_id),
+                    "tool": tool_name,
+                    "file_change_ids": [str(row.id) for row in rows],
+                    "file_changes": serialized,
+                },
+            )
+        except Exception:
+            pass
+        return [str(row.id) for row in rows]
 
 
 tool_executor = ToolExecutor()

@@ -138,6 +138,47 @@ class AgentApiClient(AbstractContextManager["AgentApiClient"]):
         payload = self._request("GET", path)
         return list(payload.get("artifacts", []))
 
+    def list_file_changes(
+        self,
+        *,
+        session_id: str | None = None,
+        run_id: str | None = None,
+        path: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        params: dict[str, Any] = {"limit": limit}
+        if session_id:
+            params["session_id"] = session_id
+        if run_id:
+            params["run_id"] = run_id
+        if path:
+            params["path"] = path
+        payload = self._request("GET", f"/file-changes?{urlencode(params)}")
+        return list(payload.get("file_changes", []))
+
+    def get_file_change(
+        self,
+        file_change_id: str,
+        *,
+        include_content: bool = True,
+    ) -> dict[str, Any]:
+        params = urlencode({"include_content": str(include_content).lower()})
+        payload = self._request("GET", f"/file-changes/{file_change_id}?{params}")
+        return dict(payload.get("file_change", {}))
+
+    def revert_file_change(
+        self,
+        file_change_id: str,
+        *,
+        force: bool = False,
+    ) -> dict[str, Any]:
+        payload = self._request(
+            "POST",
+            f"/file-changes/{file_change_id}/revert",
+            json={"force": force},
+        )
+        return dict(payload.get("file_change", {}))
+
     def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
         try:
             response = self._client.request(method, path, **kwargs)

@@ -1053,4 +1053,16 @@
 - Why it matters: the runtime can now prove the new queue observability endpoints and manual retry/cancel controls against a live Postgres-backed backend instead of only unit tests.
 - Exact files: `scripts/queue-worker-smoke.sh`, `.env.example`.
 - Exact recommended next fix: run the smoke in Docker CI after migrations with the backend worker enabled so heartbeat payloads are always exercised in addition to API row mutations.
+
+## File diff / review / undo (Batch 1)
+
+- Current improvement: `FileChange` capture, list, detail, and revert endpoints are wired through `ToolExecutor`, `write.file`/`edit.file`/`patch.apply` emit `before_content`/`after_content`/`sizes` in `ToolResult.metadata`, secret filenames are redacted, content and diff are truncated to configured byte caps, and the Dashboard exposes a **File Changes** tab with revert controls. `scripts/file-change-smoke.ps1` and `.sh` validate route registration and 200/404 round-trips.
+- Why it matters: every approved mutation tool now leaves a durable, auditable, revertible trail with secret redaction; users can review and undo risky changes from the UI.
+- Exact files: `backend/app/core/config.py`, `backend/app/db/models.py`, `backend/app/db/migrations/versions/202606070001_file_changes.py`, `backend/app/core/events.py`, `backend/app/file_changes/file_change_service.py`, `backend/app/runtime/tool_executor.py`, `backend/app/tools/write.py`, `backend/app/tools/edit.py`, `backend/app/api/routes_file_changes.py`, `backend/app/main.py`, `backend/app/cli/{api_client,render,main}.py`, `backend/tests/test_file_changes.py`, `frontend/src/api/client.ts`, `frontend/src/components/FileChangesPanel.tsx`, `frontend/src/pages/Dashboard.tsx`, `frontend/src/styles/app.css`, `scripts/file-change-smoke.{ps1,sh}`, `scripts/validate-local.ps1`.
+- Exact recommended next fix:
+  1. Revert route currently returns HTTP 500 (via `FileChangeError`) for hash mismatch when `force` is false; downgrade to 409 to match the documented contract.
+  2. Revert still bypasses the permission/approval flow; mirror the `PermissionRequest` lifecycle so destructive reverts cannot be triggered unattended.
+  3. Add a round-trip smoke that runs a real `write.file` against a live backend, polls `/file-changes`, calls `POST /file-changes/{id}/revert`, and asserts the on-disk content is restored byte-for-byte. The shipped smoke only validates endpoint registration.
+  4. Frontend File Changes panel: add batch select, filter by tool_name/tool_call, and an "approval required" gate that respects the existing permission profile.
+  5. Consider Git/VCS fallback (`git show HEAD:<path>`) when `before_content` is missing or out of date.
 - Risk if ignored: local development has a deterministic smoke path, but deployment drift in the queue endpoints or worker heartbeat lifecycle could still hide until manual verification.

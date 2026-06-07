@@ -287,7 +287,8 @@ if ($WithSmokes) {
         "db-migration-smoke.ps1",
         "mcp-plugin-smoke.ps1",
         "real-mcp-smoke.ps1",
-        "permission-resume-smoke.ps1"
+        "permission-resume-smoke.ps1",
+        "file-change-smoke.ps1"
     )
     $smokeFailures = @()
     $smokeSkips = @()
@@ -422,7 +423,8 @@ if ($WithSmokes) {
         "db-migration-smoke.ps1",
         "mcp-plugin-smoke.ps1",
         "real-mcp-smoke.ps1",
-        "permission-resume-smoke.ps1"
+        "permission-resume-smoke.ps1",
+        "file-change-smoke.ps1"
     )) {
         Record-Step -Name "smoke: $smoke" -Category "optional" -Result "skip" -Detail "WithSmokes not requested"
     }

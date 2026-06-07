@@ -71,3 +71,6 @@ class EventType(StrEnum):
     PLUGIN_FAILED = "plugin.failed"
     PLUGIN_HOOK_FAILED = "plugin.hook.failed"
     PLUGIN_TOOL_REGISTERED = "plugin.tool.registered"
+    FILE_CHANGE_CREATED = "file_change.created"
+    FILE_CHANGE_REVERTED = "file_change.reverted"
+    FILE_CHANGE_REVERT_FAILED = "file_change.revert_failed"

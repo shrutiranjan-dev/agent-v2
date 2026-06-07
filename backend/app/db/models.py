@@ -214,6 +214,75 @@ class ToolCall(Base, TimestampMixin):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class FileChange(Base, TimestampMixin):
+    __tablename__ = "file_changes"
+    __table_args__ = (
+        Index("ix_file_changes_session_created", "session_id", "created_at"),
+        Index("ix_file_changes_session_path", "session_id", "relative_path"),
+        Index("ix_file_changes_run_created", "agent_run_id", "created_at"),
+        Index("ix_file_changes_tool_call", "tool_call_id"),
+        Index("ix_file_changes_workspace_created", "workspace_id", "created_at"),
+        Index("ix_file_changes_org_created", "organization_id", "created_at"),
+        Index("ix_file_changes_revert_status", "revert_status"),
+        Index("ix_file_changes_tool_name", "tool_name"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
+    )
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False
+    )
+    agent_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("agent_runs.id", ondelete="SET NULL")
+    )
+    tool_call_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "tool_calls.id",
+            ondelete="SET NULL",
+            use_alter=True,
+            name="fk_file_changes_tool_call_id",
+        ),
+    )
+    tool_name: Mapped[str] = mapped_column(String(80), nullable=False)
+    operation: Mapped[str] = mapped_column(String(20), nullable=False)
+    relative_path: Mapped[str] = mapped_column(Text, nullable=False)
+    resolved_path: Mapped[str] = mapped_column(Text, nullable=False)
+    before_sha256: Mapped[str | None] = mapped_column(String(64))
+    after_sha256: Mapped[str | None] = mapped_column(String(64))
+    before_size_bytes: Mapped[int | None] = mapped_column(Integer)
+    after_size_bytes: Mapped[int | None] = mapped_column(Integer)
+    before_content: Mapped[str | None] = mapped_column(Text)
+    after_content: Mapped[str | None] = mapped_column(Text)
+    before_content_truncated: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    after_content_truncated: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    diff: Mapped[str | None] = mapped_column(Text)
+    diff_truncated: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    additions: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    deletions: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    replacement_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    backup_path: Mapped[str | None] = mapped_column(Text)
+    redacted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    redaction_reason: Mapped[str | None] = mapped_column(String(120))
+    revertible: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    revert_status: Mapped[str] = mapped_column(String(30), default="not_reverted", nullable=False)
+    reverted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reverted_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    revert_tool_call_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tool_calls.id", ondelete="SET NULL")
+    )
+    revert_error: Mapped[str | None] = mapped_column(Text)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
+
+
 class PermissionRequest(Base, TimestampMixin):
     __tablename__ = "permission_requests"
     __table_args__ = (
