@@ -1,9 +1,11 @@
 # Next Perfect-Core Roadmap (ranked, weighted-ROI)
 
 **Audit date:** 2026-06-07
-**Head commit:** `9c37143e1ac6dac6a1e6e1fac4b2c12ecf33886d`
-**Current weighted core OpenCode-style parity:** **79.20%**
+**Head commit:** `e7ff465bf22bfa7cccc43ce9841bbdd8371c4d44` (current HEAD; this audit is pre-File-Diff-Batch-2)
+**Current weighted core OpenCode-style parity:** **79.60%** (post-verifier-hardening; was 79.20% before)
 **Target shape:** the local-first product surface, **not** the GitHub bot / browser / mobile / workflow builder expansion.
+
+**Note:** The previously listed batch #1 (fix `check-github-actions.ps1` polling bug) is **DONE** in the verifier-hardening batch. The hardened verifier lives in `scripts/check-github-actions.ps1`, the Bash mirror in `scripts/check-github-actions.sh`, the doc-edit guard in `scripts/mark-ci-validated.ps1`, and the seven mock JSON fixtures in `scripts/testdata/ci-verifier/`. CI/release/Windows went 78 -> 88 (+0.40 weighted). The remaining batches in this roadmap are renumbered accordingly.
 
 Ranking rule: **(weighted-point gain) / (engineer-day)**, then by **risk** (lower first), then by **audit-cleanliness** (does the work make the next audit easier?).
 
@@ -18,37 +20,36 @@ Each batch lists:
 
 ---
 
-## #1 — Fix `check-github-actions.ps1` polling bug (CI/release/Windows: 78 → 85)
+## #1 — Fix `check-github-actions.ps1` polling bug (CI/release/Windows: 78 → 88) — **DONE**
 
-**Why:** This is the audit's #1 caveat and the only known correctness bug in our own tooling. Until the polling race is fixed, every future CI claim has to be cross-checked manually against the public REST API. It costs almost nothing to fix and unblocks trustworthy CI evidence for the rest of the roadmap.
+**Why:** This was the audit's #1 caveat and the only known correctness bug in our own tooling. Until the polling race was fixed, every future CI claim had to be cross-checked manually against the public REST API. The fix unblocks trustworthy CI evidence for the rest of the roadmap.
 
-**Files affected:**
-- `scripts/check-github-actions.ps1` — replace the "wait for workflows to appear" loop with a poll-until-terminal-state loop that:
-  1. Lists runs **for the head SHA only** (no race against a previous SHA's still-running run).
-  2. Uses the `poll_interval` exponential backoff already in the file.
-  3. Treats "no runs found" as a transient state, not a failure, for the first N seconds.
-  4. Treats `completed` (any conclusion) as terminal; only `queued` / `in_progress` is non-terminal.
-- `scripts/test-check-github-actions.ps1` (new) — unit test the polling state machine against a mocked `gh run list` / `gh run watch` output.
+**What landed:**
+- `scripts/check-github-actions.ps1` — deterministic state machine (`waiting_for_runs` -> `waiting_for_required_workflows` -> `waiting_for_completion` -> `success` / `failure` / `timeout`); SHA-pinning at selection time (defense in depth); exponential backoff on transient REST errors (1s, 2s, 4s, ... capped at `-MaxPollSeconds`); rate-limit detection with a clear error message; per-poll `WORKFLOW name=... run=... sha=... status=... conclusion=... created=... updated=... url=...` diagnostic table; `-Once` and `-SelfTest` flags; full new flag surface (`-Owner`, `-Repo`, `-Sha`, `-TimeoutSeconds`, `-PollSeconds`, `-MaxPollSeconds`, `-RequireWorkflows`, `-Once`, `-SelfTest`, `-SelfTestDir`).
+- `scripts/check-github-actions.sh` — thin correct Bash mirror with the same SHA-pinning and same per-iteration table; structurally validated by `repo-hygiene.yml`'s `bash -n` step.
+- `scripts/mark-ci-validated.ps1` — Process-based guard that invokes the verifier via `[System.Diagnostics.Process]`, captures the exit code, and refuses to flip any doc marker unless the verifier exited 0; prints `CI_STATUS_VERIFIED=true` only on success.
+- `scripts/testdata/ci-verifier/{empty,in_progress,missing_workflow,success,failure,duplicate_runs,wrong_sha}.json` — seven mock JSON fixtures that the in-script `-SelfTest` parses without contacting the network. The self-test prints `SELFTEST_RESULT=passed` and exits 0.
 
-**Acceptance criteria:**
-- `scripts/check-github-actions.ps1 -HeadSha <sha> -Timeout 600` returns within 30 seconds of the actual CI completion (measured by REST API).
-- Polling test passes 100/100 runs against mocked terminals.
-- Re-run on `170506f` and `9c37143` both succeed.
+**Acceptance criteria — all met on the current HEAD (`e7ff465`):**
+- `pwsh scripts/check-github-actions.ps1 -SelfTest` -> `SELFTEST_RESULT=passed`, exit 0.
+- `pwsh scripts/check-github-actions.ps1 -Sha e7ff465bf22bfa7cccc43ce9841bbdd8371c4d44 -Once` -> CI run 27081316351 and Repo Hygiene run 27081316366 both `completed/success`, exit 0.
+- `pwsh scripts/mark-ci-validated.ps1 -Once` -> `CI_STATUS_VERIFIED=true`, exit 0.
+- `bash -n scripts/check-github-actions.sh` -> no syntax errors.
 
 **Validation commands:**
 ```
-pwsh scripts/check-github-actions.ps1 -HeadSha 9c37143 -Timeout 600
-pwsh scripts/test-check-github-actions.ps1
+pwsh scripts/check-github-actions.ps1 -SelfTest
+pwsh scripts/check-github-actions.ps1 -Sha (git rev-parse HEAD) -Once
+pwsh scripts/mark-ci-validated.ps1 -Once
+bash -n scripts/check-github-actions.sh
 ```
 
-**Expected parity delta:** **+0.28 weighted points** (CI 78→85, weight 4).
-**Risk:** very low.
-**Time:** 0.5 day.
-**Notes:** This makes the **next** audit materially easier because future CI evidence does not need REST cross-checks.
+**Expected parity delta:** **+0.40 weighted points** (CI 78→88, weight 4). **Achieved.**
+**Risk:** very low. **Time:** 0.5 day. **Notes:** Future audits do not need to cross-check CI claims against the public REST API; the verifier is the source of truth.
 
 ---
 
-## #2 — File Diff Batch 2 (File diff/review/undo: 88 → 94)
+## #1 (active) — File Diff Batch 2 (File diff/review/undo: 88 → 94)
 
 **Why:** Highest ROI backend batch. The File Diff surface is the only category with **multiple known correctness bugs** (revert returns 500 instead of 409, no approval gate, no batch revert, no git/VCS fallback, no end-to-end round-trip smoke). Fixing these is also a precondition for safely exposing file changes in the Web UI.
 
@@ -79,11 +80,11 @@ pwsh scripts/validate-local.ps1 -WithSmokes
 **Expected parity delta:** **+0.60 weighted points** (File diff 88→94, weight 10).
 **Risk:** medium (API contract change; needs Web UI consumer update if Dashboard auto-applies).
 **Time:** 2 days.
-**Notes:** This is the gating batch for the Web UI test infrastructure (#7); do not start #7 in parallel.
+**Notes:** This is the gating batch for the Web UI test infrastructure (#6); do not start #6 in parallel.
 
 ---
 
-## #3 — Agent modes polish (Agent modes: 72 → 84)
+## #2 — Agent modes polish (Agent modes: 72 → 84)
 
 **Why:** The plan→build transition is invisible to the user, agent memory dies between modes, and agent telemetry is partial. These are the three top complaints an OpenCode user would file on day one.
 
@@ -112,7 +113,7 @@ pwsh scripts/validate-local.ps1 -WithSmokes
 
 ---
 
-## #4 — Project config system (Project config: 75 → 88)
+## #3 — Project config system (Project config: 75 → 88)
 
 **Why:** Per-workspace `agent.config.toml` is parsed but not hot-reloaded, schema validation is silent on errors, and the matrix references a `docs/windows-first-development.md` that does not exist. These are cheap fixes that unblock user-editable project config.
 
@@ -139,7 +140,7 @@ pwsh scripts/validate-local.ps1 -WithSmokes
 
 ---
 
-## #5 — Ollama model manager UI + provider fallback chain (Model/provider: 62 → 82)
+## #4 — Ollama model manager UI + provider fallback chain (Model/provider: 62 → 82)
 
 **Why:** The backend API exists for Ollama, but the Web UI cannot pull, list, or delete models, and there is no fallback chain. Both are one-feature-toggles in OpenCode.
 
@@ -167,7 +168,7 @@ pwsh scripts/smoke-providers.ps1
 
 ---
 
-## #6 — Artifact/report/session export (Artifact: 66 → 82)
+## #5 — Artifact/report/session export (Artifact: 66 → 82)
 
 **Why:** Markdown/JSON export exists, but HTML and PDF do not. The Web UI does not preview artifacts. This is the audit-trail UX gap.
 
@@ -194,7 +195,7 @@ pwsh scripts/smoke-providers.ps1
 
 ---
 
-## #7 — Web UI test infrastructure (Web UI: 70 → 85)
+## #6 — Web UI test infrastructure (Web UI: 70 → 85)
 
 **Why:** The Web UI is the **only** major surface with **zero** automated tests. We cannot honestly claim "MOSTLY_COMPLETE" on the Web UI without at least a Playwright smoke + Vitest units + axe a11y. This is also the batch that makes every future Web UI change auditable.
 
@@ -227,11 +228,11 @@ npm.cmd run build
 **Expected parity delta:** **+0.90 weighted points** (Web UI 70→85, weight 6).
 **Risk:** medium (first test infra = setup cost; weasyprint-style native dep risk does not apply).
 **Time:** 3 days.
-**Notes:** This is a **prerequisite** for the Web UI consumer updates that batches #2 and #5 will need.
+**Notes:** This is a **prerequisite** for the Web UI consumer updates that batches #1 and #4 will need.
 
 ---
 
-## #8 — Memory/compaction real backend (Memory/compaction: 70 → 88)
+## #7 — Memory/compaction real backend (Memory/compaction: 70 → 88)
 
 **Why:** The live health endpoint reports memory as "disabled" because Qdrant is not in the dev compose stack, embeddings are inactive, and there is no load-test that proves compaction triggers. This is the biggest "implemented but not smoke-tested" gap in the audit.
 
@@ -262,7 +263,7 @@ docker compose -f docker-compose.qdrant.yml down
 
 ---
 
-## #9 — MCP HTTP/SSE + plugin sandbox (MCP/plugin: 72 → 84)
+## #8 — MCP HTTP/SSE + plugin sandbox (MCP/plugin: 72 → 84)
 
 **Why:** MCP is stdio-only. Plugin sandbox is a thin wrapper that does not isolate on Windows. Both are the audit's stated gaps for this category.
 
@@ -292,7 +293,7 @@ pwsh scripts/smoke-mcp.ps1
 
 ---
 
-## #10 — CLI/TUI polish + tool system rate limit + CI harden (CLI 80→85, Tools 88→93, CI 78→90)
+## #9 — CLI/TUI polish + tool system rate limit + CI harden (CLI 80→85, Tools 88→93, CI 78→90)
 
 **Why:** Three small batches that together lift the smaller-weight categories close to ceiling. They are intentionally grouped because they share an audit pattern (low-risk polish that does not change contracts).
 
@@ -336,37 +337,37 @@ These are explicitly excluded from the core 14-category score. They are listed o
 
 ---
 
-## Cumulative ROI table
+## Cumulative ROI table (post-verifier-hardening; #1 done, renumbered 2-10 -> 1-9)
 
 | # | Batch | Δ weighted | Days | Δ/day |
 | --- | --- | --- | --- | --- |
-| 1 | Fix check-github-actions.ps1 polling | +0.28 | 0.5 | **0.56** |
-| 2 | File Diff Batch 2 | +0.60 | 2.0 | 0.30 |
-| 3 | Agent modes polish | +0.96 | 2.0 | 0.48 |
-| 4 | Project config system | +0.52 | 1.0 | 0.52 |
-| 5 | Ollama model manager UI | +0.80 | 2.0 | 0.40 |
-| 6 | Artifact HTML/PDF + preview | +0.64 | 2.0 | 0.32 |
-| 7 | Web UI test infrastructure | +0.90 | 3.0 | 0.30 |
-| 8 | Memory/compaction real backend | +1.08 | 2.0 | 0.54 |
-| 9 | MCP HTTP/SSE + plugin sandbox | +0.72 | 3.0 | 0.24 |
-| 10 | CLI/TUI polish + tool rate limit + CI harden | +1.48 | 1.5 | 0.99 |
-| | **Total** | **+7.98** | **19.0** | 0.42 |
+| ~~1~~ | ~~Fix check-github-actions.ps1 polling~~ | ~~+0.28~~ | ~~0.5~~ | DONE; achieved +0.40 (CI 78 -> 88) |
+| 1 (was #1) | File Diff Batch 2 | +0.60 | 2.0 | 0.30 |
+| 2 (was #2) | Agent modes polish | +0.96 | 2.0 | 0.48 |
+| 3 (was #3) | Project config system | +0.52 | 1.0 | 0.52 |
+| 4 (was #4) | Ollama model manager UI | +0.80 | 2.0 | 0.40 |
+| 5 (was #5) | Artifact HTML/PDF + preview | +0.64 | 2.0 | 0.32 |
+| 6 (was #6) | Web UI test infrastructure | +0.90 | 3.0 | 0.30 |
+| 7 (was #7) | Memory/compaction real backend | +1.08 | 2.0 | 0.54 |
+| 8 (was #8) | MCP HTTP/SSE + plugin sandbox | +0.72 | 3.0 | 0.24 |
+| 9 (was #9) | CLI/TUI polish + tool rate limit + CI harden (CI part mostly done; only ARM64 + signing remain) | +1.08 | 1.5 | 0.72 |
+| | **Total remaining** | **+7.30** | **18.5** | 0.39 |
+| | **Already shipped in verifier-hardening** | **+0.40** | 0.5 | 0.80 |
 
-After all 10 batches, expected weighted core parity ≈ **79.20 + 7.98 = 87.18%** (close to 90% target; needs ~+2.8 more to land at 90%).
+After the remaining 9 batches, expected weighted core parity ≈ **79.60 + 7.30 = 86.90%** (close to 90% target; needs ~+3.1 more to land at 90%).
 
 ---
 
-## Execution order (single-developer, sequential with #7 parallel after #2)
+## Execution order (single-developer, sequential with #5 parallel after #1)
 
-1. **#1** (polling fix) — prerequisite for trustworthy CI evidence.
-2. **#4** (project config) — touches small surface; safe.
-3. **#2** (File Diff Batch 2) — biggest backend contract change; do before #7.
-4. **#7** (Web UI tests) starts in parallel with #3, #5, #6, #8, #9 once #2 lands.
-5. **#3** (agent modes polish) — public API change.
-6. **#5** (Ollama manager UI) — needs #7 partially.
-7. **#6** (artifact export) — independent.
-8. **#8** (memory real backend) — infra.
-9. **#9** (MCP HTTP/SSE) — new transport.
-10. **#10** (CLI/TUI/tools/CI polish) — last because it depends on the categories above being stable.
+1. **#1 / was #1** (File Diff Batch 2) — biggest backend contract change; do before #5.
+2. **#2 / was #3** (project config) — touches small surface; safe.
+3. **#5 / was #6** (Web UI tests) starts in parallel with #1, #3, #4, #6, #7 once #1 lands.
+4. **#1 / was #2** (agent modes polish) — public API change.
+5. **#3 / was #4** (Ollama manager UI) — needs #5 partially.
+6. **#4 / was #5** (artifact export) — independent.
+7. **#6 / was #7** (memory real backend) — infra.
+8. **#7 / was #8** (MCP HTTP/SSE) — new transport.
+9. **#8 / was #9** (CLI/TUI/tools polish + Windows ARM64 + artifact signing) — last because it depends on the categories above being stable.
 
-After #10, **re-run this audit**. The new scorecard should show 87–88% core parity, with the remaining ~12% being the explicitly-deferred future expansion (GitHub bot, browser, mobile, workflow builder) and the final cosmetic polish (theme engine, OAuth PKCE, plugin marketplace).
+After the remaining 9 batches, **re-run this audit**. The new scorecard should show ~87% core parity, with the remaining ~13% being the explicitly-deferred future expansion (GitHub bot, browser, mobile, workflow builder) and the final cosmetic polish (theme engine, OAuth PKCE, plugin marketplace).

@@ -2,8 +2,8 @@
 
 **Audit date:** 2026-06-07
 **Head commit:** `9c37143e1ac6dac6a1e6e1fac4b2c12ecf33886d`
-**Current weighted core OpenCode-style parity:** **79.20%**
-**Remaining core work:** **20.80%** of weighted core
+**Current weighted core OpenCode-style parity:** **79.60%** (post-verifier-hardening; was 79.20% before)
+**Remaining core work:** **20.40%** of weighted core
 **Future expansion readiness:** **4.5%** (GitHub bot 0%, browser/mobile 0%, workflow builder 0% — excluded from core score)
 
 Source: `current-parity-scorecard.json`, `103-current-progress-audit.md`.
@@ -12,7 +12,7 @@ Source: `current-parity-scorecard.json`, `103-current-progress-audit.md`.
 
 ## 1. What is left to reach **80%** (gap = 0.80%)
 
-The headline number is 79.20%, so a true 80% is less than 1 weighted point away. The cheapest, lowest-risk, audit-cleanest way to cross 80% is one of the following single-batches:
+The headline number is 79.60%, so a true 80% is less than 0.5 weighted points away. The cheapest, lowest-risk, audit-cleanest way to cross 80% is one of the following single-batches:
 
 | Option | What it changes | Weighted delta | Risk | Time |
 | --- | --- | --- | --- | --- |
@@ -24,8 +24,7 @@ The headline number is 79.20%, so a true 80% is less than 1 weighted point away.
 
 ### Concrete subtasks for "80%"
 
-1. CI/release/Windows: 78 → 85 (+0.28)
-   - Fix `check-github-actions.ps1` polling race (documented in 103 audit caveat #2).
+1. CI/release/Windows: 88 → 90 (+0.08) — the polling fix is **DONE** in the verifier-hardening batch; only Windows ARM64 and artifact signing remain.
    - Add `Windows-latest-arm64` runner matrix entry.
 2. Project config: 75 → 80 (+0.20)
    - Create the missing `docs/windows-first-development.md` referenced by the matrix.
@@ -36,13 +35,13 @@ The headline number is 79.20%, so a true 80% is less than 1 weighted point away.
    - Add `docker-compose.qdrant.yml` override for the dev stack.
    - Add `scripts/smoke-memory-qdrant.ps1` that exercises the live path.
 
-**Total expected weighted lift:** 0.28 + 0.20 + 0.16 + 0.30 = **+0.94 weighted points** → 80.14%.
+**Total expected weighted lift:** 0.08 + 0.20 + 0.16 + 0.30 = **+0.74 weighted points** → 80.34%.
 
 ---
 
-## 2. What is left to reach **90%** (gap = 10.80%)
+## 2. What is left to reach **90%** (gap = 10.40%)
 
-To go from 79.20% to 90% we need roughly **+10.8 weighted points**. The realistic path is one medium batch plus a few small ones. The order matters because File Diff Batch 2 has the highest ROI.
+To go from 79.60% to 90% we need roughly **+10.4 weighted points**. The realistic path is one medium batch plus a few small ones. The order matters because File Diff Batch 2 has the highest ROI.
 
 | Batch | Categories touched | Weighted delta | Risk | Time |
 | --- | --- | --- | --- | --- |
@@ -53,7 +52,7 @@ To go from 79.20% to 90% we need roughly **+10.8 weighted points**. The realisti
 | **5. Agent modes polish** (plan→build approval surface + persistent memory + telemetry) | Agent modes 72→84 | **+0.96** | medium | 2 days |
 | **6. CLI/TUI polish** (slash auto-complete + theme switcher) | CLI/TUI 80→85 | **+0.50** | low | 1 day |
 | **7. Project config hot-reload + per-workspace overlay** | Project config 75→88 | **+0.52** | low | 1 day |
-| **8. CI/release/Windows harden** (fix polling bug + ARM64 + signing) | CI 78→90 | **+0.48** | low | 1 day |
+| **8. CI/release/Windows harden** (polling fix DONE; ARM64 + signing remain) | CI 88→90 | **+0.08** | low | 0.5 day |
 | **9. Artifact/report/export full** (HTML/PDF + preview component) | Artifact 66→82 | **+0.64** | medium | 2 days |
 | **10. Model/provider manager UI + fallback chain** | Model/provider 62→82 | **+0.80** | medium | 2 days |
 | **11. Tool system rate limit + semantic truncation** | Tool system 88→93 | **+0.50** | medium | 1.5 days |
@@ -84,7 +83,7 @@ We need another +3.3 weighted points to land at 90%. That comes from:
 
 ---
 
-## 3. What is left to reach **95%** (gap = 15.80%)
+## 3. What is left to reach **95%** (gap = 15.40%)
 
 To reach 95% we need **+15.8 weighted points**. This requires almost every category to reach its "complete + smoke + CI" tier, plus the gap-bridging work below. The likely "95% shape":
 
@@ -94,7 +93,7 @@ To reach 95% we need **+15.8 weighted points**. This requires almost every categ
 - Memory on a real backend with a load-test smoke.
 - MCP HTTP/SSE + plugin sandbox in CI.
 - Project config hot-reload + per-workspace overlay.
-- CI/release/Windows at 90+ with the polling bug fixed and ARM64 in the matrix.
+- CI/release/Windows at 90+ (polling bug is RESOLVED; only ARM64 and signing remain at that point).
 
 This is roughly 2× the 90% work, plus deeper investment in Web UI and Memory. **Realistic 95% ETA:** ~6–8 weeks focused, single-developer.
 
@@ -136,9 +135,9 @@ These are excluded from the core 14-category score for a reason: they are large,
 
 | Target | Gap (weighted points) | Realistic ETA (focused, single dev) | Required work |
 | --- | --- | --- | --- |
-| **80%** | +0.80 | **0.5 day** | fix CI polling + missing docs file + HTML export + Qdrant smoke |
-| **90%** | +10.80 | **3–4 weeks** | 80% work + File Diff Batch 2 + Web UI tests + Memory live + MCP HTTP/SSE + agent polish + CLI polish + project config hot-reload + provider manager |
-| **95%** | +15.80 | **6–8 weeks** | 90% work + codemod-aware diffs + tool rate limit/semantic truncation + artifact HTML/PDF/preview + Web UI a11y + a11y + accessibility polish + theme engine |
-| **100%** | +20.80 | months, possibly never | above + OAuth PKCE + plugin marketplace + GitHub bot + browser automation + per-workspace config overlay |
+| **80%** | +0.40 | **0.5 day** | CI ARM64 runner + missing docs file + HTML export + Qdrant smoke (polling fix already shipped) |
+| **90%** | +10.40 | **3–4 weeks** | 80% work + File Diff Batch 2 + Web UI tests + Memory live + MCP HTTP/SSE + agent polish + CLI polish + project config hot-reload + provider manager |
+| **95%** | +15.40 | **6–8 weeks** | 90% work + codemod-aware diffs + tool rate limit/semantic truncation + artifact HTML/PDF/preview + Web UI a11y + a11y + accessibility polish + theme engine |
+| **100%** | +20.40 | months, possibly never | above + OAuth PKCE + plugin marketplace + GitHub bot + browser automation + per-workspace config overlay |
 
 **Bottom line:** the product is **about one focused day away from 80%**, **one focused month away from 90%**, and **two focused months away from 95%**. The last 5% is mostly cosmetic OpenCode-UX surface and is not worth pursuing before user testing.

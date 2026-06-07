@@ -4,17 +4,17 @@
   "head_commit_short": "9c37143",
   "branch": "main",
   "scoring_scale": "0 / 25 / 50 / 70 / 85 / 95 / 100 per category (0=nothing, 25=stub, 50=partial MVP, 70=usable, 85=mostly complete + tested, 95=complete + smoke + CI, 100=exact OpenCode parity).",
-  "core_open_code_style_parity_percent": 79.20,
-  "remaining_core_work_percent": 20.80,
+  "core_open_code_style_parity_percent": 79.60,
+  "remaining_core_work_percent": 20.40,
   "future_expansion_readiness_percent": 4.5,
   "confidence": "HIGH",
   "scoring_notes": "Weighted sum across 14 core categories (weights sum to 100%). GitHub bot (18% weight), browser/mobile automation (0%), and workflow builder (0%) are tracked separately as future expansion; their average gives 4.5% future-readiness. The 102-full-parity-audit.md snapshot used a 13-category unweighted average (~70%); this scorecard uses a 14-category strict weighted score and is not directly comparable to that snapshot.",
   "last_feature_commit": "170506f (File Diff Batch 1)",
   "ci_status": {
-    "ci_workflow": "PASS (run 27079898549 on 9c37143, locally cross-checked via REST API; check-github-actions.ps1 polling bug noted)",
-    "repo_hygiene_workflow": "PASS (run 27079898561 on 9c37143)",
-    "polling_bug_note": "check-github-actions.ps1 timed out on 170506f even though the run was already success; the bug is documented in 103-current-progress-audit.md caveat #2 and is the #1 next batch in next-perfect-core-roadmap.md.",
-    "local_validations_on_9c37143": "compileall=clean, ruff=clean, pytest=264 passed / 4 skipped, npm build=PASS, docker compose config=PASS, validate-local.ps1=PASS (6/6 passed, 11 skipped, 0 failed)"
+    "ci_workflow": "PASS on the current HEAD via the hardened check-github-actions.ps1 verifier (CI_STATUS_VERIFIED=true). Earlier heads were also PASS; the previous cross-check-via-REST-API caveat is no longer needed.",
+    "repo_hygiene_workflow": "PASS on the current HEAD via the hardened check-github-actions.ps1 verifier.",
+    "polling_bug_note": "RESOLVED. The hardened scripts/check-github-actions.ps1 has a deterministic state machine, SHA-pins every selected run to the exact requested SHA, retries on transient REST errors with exponential backoff, detects GitHub rate-limit responses, and ships an in-script -SelfTest that returns SELFTEST_RESULT=passed against seven mock JSON fixtures. The companion scripts/mark-ci-validated.ps1 invokes the verifier via [System.Diagnostics.Process] and refuses to flip any doc marker unless the verifier exits 0.",
+    "local_validations_on_e7ff465": "compileall=clean, ruff=clean, pytest=264 passed / 4 skipped, npm build=PASS, docker compose config=PASS, validate-local.ps1=PASS (6/6 passed, 11 skipped, 0 failed), check-github-actions.ps1 -SelfTest=PASS, mark-ci-validated.ps1 -Once=PASS (CI_STATUS_VERIFIED=true)"
   },
   "categories": [
     {
@@ -328,29 +328,34 @@
     {
       "name": "CI/release/Windows",
       "weight": 4,
-      "verified_percent": 78,
-      "weighted_contribution": 3.12,
-      "status": "MOSTLY_COMPLETE_WITH_KNOWN_BUG",
+      "verified_percent": 88,
+      "weighted_contribution": 3.52,
+      "status": "MOSTLY_COMPLETE",
       "evidence_files": [
         ".github/workflows/ci.yml (8 jobs)",
         ".github/workflows/repo-hygiene.yml",
         ".github/workflows/smoke.yml (workflow_dispatch only)",
-        "scripts/check-github-actions.ps1 (has polling bug)",
+        "scripts/check-github-actions.ps1 (hardened: state machine, SHA-pinned, exponential backoff, rate-limit detection, -SelfTest)",
+        "scripts/check-github-actions.sh (Bash mirror, structurally validated by repo-hygiene's bash -n step)",
+        "scripts/mark-ci-validated.ps1 (Process-based guard, refuses to flip docs unless verifier exits 0)",
+        "scripts/testdata/ci-verifier/*.json (seven mock JSON fixtures: empty, in_progress, missing_workflow, success, failure, duplicate_runs, wrong_sha)",
         "scripts/validate-local.ps1"
       ],
-      "tests": [],
+      "tests": [
+        "scripts/check-github-actions.ps1 -SelfTest (in-script, 7 fixtures, prints SELFTEST_RESULT=passed)"
+      ],
       "smokes": ["scripts/smoke-ci.ps1"],
       "ci_evidence": [
-        "ci.yml PASS on 9c37143 (run 27079898549)",
-        "repo-hygiene.yml PASS on 9c37143 (run 27079898561)",
+        "ci.yml PASS on the current HEAD (verified via the hardened check-github-actions.ps1, which prints CI_STATUS_VERIFIED=true via mark-ci-validated.ps1)",
+        "repo-hygiene.yml PASS on the current HEAD (verified via the same path)",
         "smoke.yml is workflow_dispatch only; not in any scheduled path"
       ],
       "remaining_gaps": [
-        "check-github-actions.ps1 has a polling race when the run completes in <=2 minutes; it timed out on 170506f even though the run was already success.",
         "No Windows ARM64 in the CI matrix; only x64 Windows runners.",
-        "No release artifact signing."
+        "No release artifact signing.",
+        "The hardened verifier is structurally validated by -SelfTest and by `bash -n` on the Bash mirror; it is not yet covered by an end-to-end Pester/pester test (deferred, low ROI)."
       ],
-      "next_action": "Fix check-github-actions.ps1 polling bug (the #1 next batch); add Windows ARM64 runner; add artifact signing for release tags."
+      "next_action": "Add Windows ARM64 runner; add artifact signing for release tags. The polling-bug fix and the SHA-pinning / backoff / self-test work are DONE; do not regress them."
     }
   ],
   "future_expansion_categories": [
@@ -382,9 +387,9 @@
   "top_5_completed": [
     "Tool system (88%): 14 built-in tools, registry, tests, smoke, CI",
     "File diff/review/undo (88%): Batch 1 landed in 170506f with hash-tracked staging",
+    "CI/release/Windows (88%): hardened verifier with state machine, SHA-pinning, exponential backoff, rate-limit detection, seven-fixture -SelfTest, and a mark-ci-validated.ps1 guard that refuses to flip docs unless the verifier exits 0",
     "Permission+human loop (86%): policy engine + approval queue + tests + smoke + CI",
-    "LSP/codeintel (86%): Multi-LSP Batch 1 (f0e27a0) with diagnostics + tests + smoke + CI",
-    "Core runtime (84%): session manager + turn executor + event bus + queue + tests + smoke + CI"
+    "LSP/codeintel (86%): Multi-LSP Batch 1 (f0e27a0) with diagnostics + tests + smoke + CI"
   ],
   "top_5_remaining_gaps": [
     "Web UI has zero automated tests (Vitest/Playwright/axe), no bundle budget, no a11y check, no real WebSocket consumer.",
@@ -395,6 +400,6 @@
   ],
   "delta_vs_previous_audits": {
     "102_full_parity_audit": "13-category unweighted average ~70% on different categories; not directly comparable.",
-    "flow_parity_matrix_verified": "12-category unweighted 72% on commit 170506f; this audit is 79.20% on 9c37143 (File Diff Batch 1 + CI flag flip)."
+    "flow_parity_matrix_verified": "12-category unweighted 72% on commit 170506f; the pre-verifier-hardening 14-category weighted audit was 79.20% on 9c37143; this re-audit after the verifier hardening (CI/release/Windows 78 -> 88) is 79.60% on e7ff465."
   }
 }

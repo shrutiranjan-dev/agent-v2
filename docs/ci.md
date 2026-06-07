@@ -50,21 +50,152 @@ The two lanes are intentionally separate:
 
 ## Repo-Local CI Verification
 
-Use the repo-local verifier before changing docs from `REAL_LSP_CI_VALIDATED` to `REAL_LSP_CI_VALIDATED`.
+The repo-local verifier is the only sanctioned way to prove that a
+commit's GitHub Actions are green from a developer machine. The
+verifier is in `scripts/check-github-actions.ps1` (PowerShell, source
+of truth) with a thin correct Bash mirror in
+`scripts/check-github-actions.sh`. The companion script
+`scripts/mark-ci-validated.ps1` is the only sanctioned path to flip
+the `REAL_LSP_CI_VALIDATED` ->
+`REAL_LSP_CI_VALIDATED` markers in the docs.
 
-PowerShell:
+### Verifier state machine
 
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\check-github-actions.ps1 -Owner shrutiranjan-dev -Repo agent-v2 -Sha (git rev-parse HEAD) -RequireWorkflows "CI","Repo Hygiene"
+The verifier prints a `poll N state=<state>` line on every iteration
+so failures are easy to diagnose. The states are:
+
+| State | Meaning | Action on entry |
+| --- | --- | --- |
+| `waiting_for_runs` | The GitHub REST API has not yet attached any runs to the requested SHA. | Keep polling until at least one run appears or the timeout expires. |
+| `waiting_for_required_workflows` | At least one run exists for the SHA, but at least one required workflow (default `CI`, `Repo Hygiene`) is missing. | Print the list of *discovered* workflow names so the operator can see which runs exist; keep polling. |
+| `waiting_for_completion` | All required workflows are found for the SHA, but at least one is `queued` or `in_progress`. | Keep polling; only fail on a terminal non-success conclusion. |
+| `success` | Every required workflow concluded `success` for the exact requested SHA. | Exit 0 and print `all required workflows concluded success for SHA <sha>`. |
+| `failure` | A required workflow concluded anything other than `success` (`failure`, `cancelled`, `timed_out`, `action_required`, `startup_failure`, `stale`). | Exit 1 immediately with the workflow name, conclusion, and run id. |
+| `timeout` | The deadline expired before `success` or `failure` could be determined. | Exit 1 with the most recent state and a clear reason. |
+
+### SHA pinning (defense in depth)
+
+The verifier requires the requested SHA twice: once as the
+`?head_sha=<sha>` REST API filter, and again at selection time, where
+any run whose `head_sha` does not exactly match the requested SHA is
+discarded. A run that is *newer* but on a different SHA is never
+accepted.
+
+### Per-poll diagnostic table
+
+Every poll prints one line per *selected* run in the form:
+
+```text
+WORKFLOW name=<name> run=<id> sha=<sha> status=<status> conclusion=<conclusion> created=<iso8601> updated=<iso8601> url=<html_url>
 ```
 
-Guarded doc update:
+`status` is one of `queued`, `in_progress`, `completed`,
+`pending`, `waiting`, `requested`. `conclusion` is `null` until
+`status=completed`; then it is `success`, `failure`, `cancelled`,
+`timed_out`, `action_required`, `skipped`, `stale`, or
+`neutral`. The line is intentionally stable so it can be grepped by
+post-merge monitoring or by the next audit's doc generator.
+
+### Transport selection
+
+- If `gh` is on `PATH` and exits 0, the verifier uses `gh api /repos/<owner>/<repo>/actions/runs?head_sha=<sha>&per_page=100`.
+- Otherwise the verifier uses `Invoke-RestMethod` against
+  `https://api.github.com/repos/<owner>/<repo>/actions/runs?head_sha=<sha>&per_page=100`
+  with the `Accept: application/vnd.github+json` and
+  `X-GitHub-Api-Version: 2022-11-28` headers.
+- The `GITHUB_TOKEN` env var is honored if present but is **not**
+  required. Public repositories can be checked without a token; the
+  unauthenticated rate limit (60 req/hr per IP) is sufficient for the
+  single SHA check.
+
+### Backoff and rate-limit handling
+
+- A single transient error (5xx, network timeout) triggers an
+  exponential backoff of 1s, 2s, 4s, ..., capped at `-MaxPollSeconds`
+  (default 60s). The backoff resets to `-PollSeconds` after the next
+  successful poll.
+- A 403 with the body `{"message": "API rate limit exceeded..."}` is
+  detected and exits 1 immediately with a clear error; the operator
+  must either set `GITHUB_TOKEN` or wait for the rate limit window.
+
+### Self-test mode
+
+The verifier ships with seven mock JSON fixtures in
+`scripts/testdata/ci-verifier/`. Running:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\check-github-actions.ps1 -SelfTest
+```
+
+validates the parser/selector against `empty`, `in_progress`,
+`missing_workflow`, `success`, `failure`, `duplicate_runs`, and
+`wrong_sha` and prints `SELFTEST_RESULT=passed` on success. The
+self-test does not contact the network and is safe in CI. The Bash
+mirror is structurally validated by `repo-hygiene.yml`'s `bash -n`
+step; the PowerShell script is structurally validated by the same
+job's `PSParser::Tokenize` step.
+
+### Flags
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `-Owner` | `shrutiranjan-dev` | GitHub org or user. |
+| `-Repo` | `agent-v2` | Repository name. |
+| `-Sha` | `git rev-parse HEAD` | Commit SHA. Must match `^[0-9a-fA-F]{7,64}$`. |
+| `-TimeoutSeconds` | `600` | Maximum wall-clock time before exiting 1. |
+| `-PollSeconds` | `15` | Initial polling interval. |
+| `-MaxPollSeconds` | `60` | Upper bound for the polling interval under backoff. |
+| `-RequireWorkflows` | `("CI", "Repo Hygiene")` | Workflow display names that must conclude `success`. |
+| `-Once` | off | Skip polling: do exactly one lookup and exit based on that lookup. |
+| `-SelfTest` | off | Run the parser/selector self-test against mock JSON fixtures and exit. |
+| `-SelfTestDir` | `scripts/testdata/ci-verifier` | Directory of mock JSON files for `-SelfTest`. |
+
+### Verifier invocation
+
+PowerShell (source of truth):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\check-github-actions.ps1 `
+    -Owner shrutiranjan-dev `
+    -Repo agent-v2 `
+    -Sha (git rev-parse HEAD) `
+    -RequireWorkflows "CI","Repo Hygiene" `
+    -TimeoutSeconds 600 `
+    -PollSeconds 20
+```
+
+Bash mirror (Linux/macOS/CI):
+
+```bash
+bash scripts/check-github-actions.sh \
+    --owner shrutiranjan-dev \
+    --repo agent-v2 \
+    --sha "$(git rev-parse HEAD)" \
+    --require-workflows "CI,Repo Hygiene" \
+    --timeout-seconds 600 \
+    --poll-seconds 20
+```
+
+### Guarded doc update
+
+`mark-ci-validated.ps1` invokes the verifier via
+`[System.Diagnostics.Process]` (so the child's non-zero exit and
+stderr do not interact with the parent's `$ErrorActionPreference`),
+captures the exit code, and refuses to modify any doc unless the
+verifier exited 0. On success it prints:
+
+```text
+CI_STATUS_VERIFIED=true
+```
+
+and only then replaces `REAL_LSP_CI_VALIDATED`
+with `REAL_LSP_CI_VALIDATED` in the configured docs. Manually flipping
+the markers in the docs is a violation of the verification contract
+and is forbidden by the same audit.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\mark-ci-validated.ps1
 ```
-
-The guard refuses to edit docs unless all required workflows conclude `success`.
 
 ## Default CI Design
 

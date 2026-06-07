@@ -1,0 +1,17 @@
+{
+  "total_count": 1,
+  "workflow_runs": [
+    {
+      "id": 2001,
+      "name": "CI",
+      "head_sha": "1111111111111111111111111111111111111111",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/shrutiranjan-dev/agent-v2/actions/runs/2001",
+      "created_at": "2026-06-07T10:00:00Z",
+      "updated_at": "2026-06-07T10:03:00Z",
+      "run_number": 101
+    }
+  ]
+}
