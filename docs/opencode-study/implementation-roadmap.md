@@ -1554,8 +1554,39 @@ Date: 2026-06-07
 
 ## Known limitations
 
-- The `force` revert path bypasses the hash check; this is acceptable for power users but should be paired with a permission/audit gate in Batch 2 to avoid unattended destruction.
+- The `force` revert path bypasses the hash check; it now goes through the same approval gate (when `AP_FILE_CHANGE_REVERT_REQUIRES_APPROVAL=true`, the default) so unattended destruction is blocked.
 - Tests for `write_text` on Windows use `write_bytes(b"...")` instead of `write_text("...")` to avoid universal newlines translating `\n` to `\r\n` and breaking the hash-vs-content comparison.
-- The revert route currently raises `FileChangeError` (HTTP 500) for hash mismatch even when not forced; Batch 2 should downgrade this to 409 to match the documented contract.
-- The frontend File Changes panel is read-mostly for Batch 1: there is no inline approval flow, batch select, or filter-by-tool-call.
+
+## File Diff / Review / Undo — Batch 2 (DONE)
+
+Closes the five concrete gaps that were on the Batch 1 polish list:
+
+1. **Revert approval gate.** `revert_file_change()` now requires an approved `permission_request_id` when `AP_FILE_CHANGE_REVERT_REQUIRES_APPROVAL=true` (default). Without one, the route returns HTTP 202 with `{"status": "waiting_permission", "permission_request_id", "approval_nonce"}` and emits `FILE_CHANGE_REVERT_WAITING_PERMISSION`. The client calls `POST /permissions/{id}/approve` and retries with `permission_request_id=...`. The CLI `agentv2 changes revert` exposes `--approve` (auto-approve) and `--permission-request-id` flows.
+2. **409 hash-mismatch contract.** `routes_file_changes.py` now maps `FileChangeHashMismatch` and `FileChangeAlreadyReverted` to HTTP 409 with `code="file_change_hash_mismatch"` / `code="file_change_already_reverted"`. Secret filenames without `force=true` return 409 `file_change_secret_requires_force`. Outside-workspace targets return 403 `file_change_outside_workspace`. Unknown ids return 404.
+3. **Batch revert API.** `POST /file-changes/revert-batch` accepts `{"change_ids": [...100], "force": false, "permission_request_id": null}`. The handler validates all preconditions first (revertible, secret, outside-workspace, hash, duplicate) and rolls back on any failure with a structured `details.skipped` array. On success returns `{reverted, skipped, failed, restored_from_snapshots}`. The Pydantic `BatchRevertRequest` removed `max_length=100` to surface a structured 422 `file_change_validation` with `{requested, limit}` for `> 100` ids.
+4. **Git/VCS fallback.** `restore_from_git_head(relative_path)` is the secondary restore channel used when the snapshot is missing or stale. Capability-detected (must be inside a Git working tree) and gated by `AP_FILE_CHANGE_GIT_FALLBACK_ENABLED`. Unit-tested with a temp git repo.
+5. **End-to-end round-trip smoke.** `scripts/file-change-smoke.ps1` and `.sh` use the gated test endpoint (`AP_ENABLE_TEST_ENDPOINTS=true`) to perform a real write+revert round-trip and print `FILE_CHANGES=round_trip_validated` only when the on-disk SHA-256 matches the original. They print `FILE_CHANGES=skipped_test_endpoint_disabled` (exit 0) when test endpoints are disabled.
+
+### Files affected
+
+- `backend/app/file_changes/file_change_service.py` — added `revert_file_changes_batch()`, `restore_from_git_head()`, `FileChangeSecretRequiresForce`, `FileChangeHashMismatch`, `FileChangeAlreadyReverted`; split hash check into precondition (`check_hash=False` for batch) + post-precondition re-check.
+- `backend/app/api/routes_file_changes.py` — added `POST /file-changes/revert-batch`; mapped new 409 / 403 / 404 / 422 responses; 202 waiting_permission body shape.
+- `backend/app/core/config.py` — `AP_FILE_CHANGE_REVERT_REQUIRES_APPROVAL` (default true), `AP_FILE_CHANGE_GIT_FALLBACK_ENABLED` env-var overrides.
+- `backend/app/core/events.py` — 8 new event types (REQUESTED, WAITING_PERMISSION, APPROVED, DENIED, REVERTED, FAILED + BATCH_REQUESTED, BATCH_REVERTED, BATCH_FAILED).
+- `backend/app/cli/api_client.py` — `revert_file_change(force=, permission_request_id=)`, `revert_file_changes_batch(...)`.
+- `backend/app/cli/main.py` — new `agentv2 changes revert-batch`; `--approve` / `--permission-request-id` on `changes revert`; waiting_permission guidance on exit 2.
+- `backend/tests/fakes.py` — `FakeAsyncSession.rollback()`.
+- `backend/tests/test_file_changes_batch2.py` (new) — 26 tests covering 409 contract, 403 secret/outside-workspace, 404 unknown id, 202 approval gate, batch atomicity, Git fallback, CLI surfaces.
+- `frontend/src/api/client.ts` — `revertFileChangesBatch` API method.
+- `frontend/src/components/FileChangesPanel.tsx` — `waitingPermission` / `RevertErrorState` UI, `Approve and retry` button, conflict (409) / forbidden (403) classification.
+- `scripts/file-change-smoke.ps1` + `scripts/file-change-smoke.sh` — rewritten for real E2E round-trip; prints `FILE_CHANGES=round_trip_validated` or `FILE_CHANGES=skipped_test_endpoint_disabled`.
+
+### Validation status
+
+- Backend tests: `.venv\Scripts\python.exe -m pytest backend\tests` passed: `290 passed, 4 skipped, 2 warnings in 24.14s` (was `264 passed, 3 skipped` before the batch; the 26 new file-change-batch2 tests are all included, plus the 21 existing file-change tests still pass).
+- File-change tests: `.venv\Scripts\python.exe -m pytest backend\tests\test_file_changes.py backend\tests\test_file_changes_batch2.py -q` passed: `47 passed`.
+- Compile: `.venv\Scripts\python.exe -m compileall backend\app` passed silently.
+- Ruff: `.venv\Scripts\python.exe -m ruff check backend` passed: `All checks passed!`.
+- Frontend build/typecheck: `npm.cmd run build` in `frontend/` passed: `tsc -b && vite build` produced `dist/index.html 0.42 kB`, `dist/assets/index-*.css 19.35 kB`, `dist/assets/index-*.js 198.48 kB`, built in 6.56s.
+- `file-change-smoke` round-trip path runs against a live backend with `AP_ENABLE_TEST_ENDPOINTS=true`; the new SMOKE markers are `FILE_CHANGES=round_trip_validated` / `skipped_test_endpoint_disabled` / `endpoint_validated`.
 

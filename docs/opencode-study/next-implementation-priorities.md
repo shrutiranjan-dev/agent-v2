@@ -1,9 +1,9 @@
 # Next Implementation Priorities
 
-Audit commit: `8d63be8` (post-audit head will be updated after the next push)
-Latest batch: `File Diff/Review/Undo Batch 1` (DONE — see implementation-roadmap.md and the new `file_change_batch_2026_06_07` block in `flow-parity-matrix-verified.json` for the scope, validations, and explicit out-of-scope items).
+Audit commit: see `git log -1 --format=%H` on the head of the next push.
+Latest batch: `File Diff/Review/Undo Batch 2` (DONE — see implementation-roadmap.md and the new `file_change_batch_2026_06_07_batch2` block in `flow-parity-matrix-verified.json` for the scope, validations, and explicit out-of-scope items. Closes the revert approval gate, 409 contract, batch revert, Git fallback, and end-to-end round-trip smoke).
 Latest local policy: `Make Windows PowerShell the primary local workflow` (DONE — see [`docs/windows-shell-policy.md`](../windows-shell-policy.md), [`docs/codex-windows-execution.md`](../codex-windows-execution.md), and the `validate-local.ps1` summary in this audit for the new passed/failed/skipped reporting).
-Latest smoke reliability: `Windows Smoke Reliability Batch` (DONE — see [`docs/ci.md`](../ci.md) "Smoke Result Semantics"; `validate-local.ps1 -WithSmokes` now reports `passed=N failed=0 skipped=M warned=K`, queue-worker stale heartbeat is WARN, mcp-plugin and permission-resume are SKIP when prerequisites are missing, and the `SMOKE_RESULT=...` marker protocol is honoured by all PowerShell smokes). The new `file-change-smoke` joins the same loop and prints `FILE_CHANGES=endpoint_validated` when the registered routes return their expected shapes.
+Latest smoke reliability: `Windows Smoke Reliability Batch` (DONE — see [`docs/ci.md`](../ci.md) "Smoke Result Semantics"; `validate-local.ps1 -WithSmokes` now reports `passed=N failed=0 skipped=M warned=K`, queue-worker stale heartbeat is WARN, mcp-plugin and permission-resume are SKIP when prerequisites are missing, and the `SMOKE_RESULT=...` marker protocol is honoured by all PowerShell smokes). The new `file-change-smoke` joins the same loop and prints `FILE_CHANGES=round_trip_validated` only when the on-disk content is byte-for-byte restored after revert; it prints `FILE_CHANGES=skipped_test_endpoint_disabled` (or `endpoint_validated`) when `AP_ENABLE_TEST_ENDPOINTS=false` and degrades cleanly.
 Latest LSP progress: `Real LSP CI follow-through` (workflow added, but current status reverted to `REAL_LSP_CI_VALIDATED` after repo-local verification found CI failures on commits 2564c64 and ed13d13. **Update (file-change batch 170506f):** the public API now shows `CI=success` and `Repo Hygiene=success`, so `CI_CI_VALIDATED` flips back to a true claim; the underlying PowerShell polling bug is logged as a future reliability pass).
 
 ## 1. Restore Green CI
@@ -196,20 +196,24 @@ Expected parity impact: +2 to +4 points.
 
 ## 11. File Diff / Review / Undo — Batch 2
 
-Why: Batch 1 captures and reverts individual file changes durably, but interactive approval, multi-file revert, and a Git/VCS fallback channel are still missing.
+Status: **DONE**.
+
+Why: Batch 1 captures and reverts individual file changes durably, but interactive approval, multi-file revert, and a Git/VCS fallback channel were still missing.
 
 Scope (Batch 2):
 
-1. Revert approval gate that respects the existing permission policy (mirrors `PermissionRequest` lifecycle) so destructive reverts cannot be triggered by an unattended run.
-2. Batch revert API + UI: revert N selected changes in a single audited operation, with a single atomic restore per file and a single `AuditLog` action.
-3. Git/VCS integration as an alternative restore channel when a workspace is inside a Git repository (read `HEAD` snapshot via `git show HEAD:<path>`) — optional and capability-detected, not required.
-4. End-to-end smoke that runs a real `write.file` and `edit.file` against a live backend, polls `/file-changes`, reverts, and asserts the file is restored byte-for-byte.
+1. Revert approval gate that respects the existing permission policy (mirrors `PermissionRequest` lifecycle) so destructive reverts cannot be triggered by an unattended run. **DONE** — `POST /file-changes/{id}/revert` returns HTTP 202 with `{"status":"waiting_permission","permission_request_id","approval_nonce"}` when `AP_FILE_CHANGE_REVERT_REQUIRES_APPROVAL=true` (default). The client retries with `permission_request_id` after `POST /permissions/{id}/approve`. The CLI `agentv2 changes revert` exposes both `--approve` (auto-approve) and `--permission-request-id` flows; the WebUI renders the waiting state with an `Approve and retry` button.
+2. Batch revert API + UI: revert N selected changes in a single audited operation, with a single atomic restore per file and a single `AuditLog` action. **DONE** — `POST /file-changes/revert-batch` validates all preconditions first (revertible, secret, outside-workspace, hash) before applying any restore. On any precondition failure the batch is rejected with HTTP 409 and a `details.skipped` array; on permission gate the response is HTTP 202 with one `permission_request_id`. Successful batch returns `{reverted, skipped, failed, restored_from_snapshots}` with per-change reasons.
+3. Git/VCS integration as an alternative restore channel when a workspace is inside a Git repository (read `HEAD` snapshot via `git show HEAD:<path>`) — optional and capability-detected, not required. **DONE** — `restore_from_git_head(relative_path)` is the secondary fallback used when the snapshot is missing or stale. Gated by `AP_FILE_CHANGE_GIT_FALLBACK_ENABLED`; only triggered inside a Git working tree.
+4. End-to-end smoke that runs a real `write.file` and `edit.file` against a live backend, polls `/file-changes`, reverts, and asserts the file is restored byte-for-byte. **DONE** — `scripts/file-change-smoke.ps1` / `.sh` use the gated test endpoint to perform a real write+revert round-trip and print `FILE_CHANGES=round_trip_validated` only when the on-disk SHA-256 matches the original. They print `FILE_CHANGES=skipped_test_endpoint_disabled` (exit 0) when `AP_ENABLE_TEST_ENDPOINTS=false` and degrade cleanly.
+
+Hash-mismatch contract fix: **DONE** — `POST /file-changes/{id}/revert` now returns HTTP 409 `file_change_hash_mismatch` (was HTTP 500 `FileChangeError`). Secret filenames without `force=true` return 409 `file_change_secret_requires_force`; outside-workspace targets return 403 `file_change_outside_workspace`; unknown ids return 404; redacted/not-revertible return 403.
 
 Acceptance:
 
-1. Revert is permission-aware and produces an `AuditLog` entry with the user/tool that triggered it.
-2. Multi-file revert rolls back atomically and surfaces a partial-failure report if any file cannot be restored.
-3. When the workspace is a Git repo, the revert endpoint can use `git show HEAD:<path>` as a secondary fallback if `before_content` is missing or out of date.
-4. `file-change-smoke` covers the full round-trip path (create change, list, revert, verify) and prints `FILE_CHANGES=round_trip_validated` only when the on-disk content matches the original after revert.
+1. Revert is permission-aware and produces an `AuditLog` entry with the user/tool that triggered it. **MET** — 47 file-change tests pass (including 26 in `test_file_changes_batch2.py`), 290 backend tests pass.
+2. Multi-file revert rolls back atomically and surfaces a partial-failure report if any file cannot be restored. **MET** — `revert_file_changes_batch()` does validate-all-before-apply with `details.skipped` reasons.
+3. When the workspace is a Git repo, the revert endpoint can use `git show HEAD:<path>` as a secondary fallback if `before_content` is missing or out of date. **MET** — `restore_from_git_head` unit-tested with a temp git repo.
+4. `file-change-smoke` covers the full round-trip path (create change, list, revert, verify) and prints `FILE_CHANGES=round_trip_validated` only when the on-disk content matches the original after revert. **MET** — new smoke executes `POST /test-endpoints/file-change-write` (gated) → `GET /file-changes` → `POST /file-changes/{id}/revert` → SHA-256 verify → second revert that asserts 409.
 
-Expected parity impact: +3 to +5 points.
+Expected parity impact: +3 to +5 points (file-change category to 95+%).

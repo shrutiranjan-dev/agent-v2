@@ -292,6 +292,8 @@ AP_FILE_CHANGES_CAPTURE_CONTENT=true
 AP_FILE_CHANGES_CAPTURE_DIFF=true
 AP_FILE_CHANGES_MAX_CONTENT_BYTES=512000
 AP_FILE_CHANGES_MAX_DIFF_BYTES=256000
+AP_FILE_CHANGE_REVERT_REQUIRES_APPROVAL=true   # Batch 2: gate revert via the permission flow
+AP_FILE_CHANGE_GIT_FALLBACK_ENABLED=true       # Batch 2: use git show HEAD:<path> when snapshot is stale
 ```
 
 Behavior:
@@ -306,13 +308,32 @@ Behavior:
 - API endpoints (mounted under `/file-changes`):
   - `GET /file-changes?session_id=&run_id=&path=&revert_status=&limit=200`
   - `GET /file-changes/{id}?include_content=true` (default metadata-only)
-  - `POST /file-changes/{id}/revert` with `{"force": false}` for atomic
-    restoration. Returns 404 if not found, 403 if redacted/not revertible,
-    409 if already reverted or the on-disk hash does not match
-    `after_sha256` (unless `force=true`).
-- CLI: `ap changes list`, `ap changes show <id>`, `ap changes revert <id> --force`.
+  - `POST /file-changes/{id}/revert` with `{"force": false, "permission_request_id": "..."}`
+    for atomic restoration. Returns 404 if not found, 403 if redacted/not
+    revertible or the path is outside the workspace root, 409 if already
+    reverted or the on-disk hash does not match `after_sha256` (unless
+    `force=true`), 202 `waiting_permission` if the approval gate is on and
+    no `permission_request_id` is supplied, and 422 `file_change_validation`
+    for `change_ids > 100` (batch endpoint only).
+  - `POST /file-changes/revert-batch` with `{"change_ids": [...100], "force": false, "permission_request_id": "..."}`.
+    Validates all preconditions first and returns 409 with `details.skipped` on
+    any conflict, or `{reverted, skipped, failed, restored_from_snapshots}` on success.
+- CLI: `agentv2 changes list`, `agentv2 changes show <id>`,
+  `agentv2 changes revert <id> [--force] [--approve] [--permission-request-id <id>]`,
+  `agentv2 changes revert-batch <id1> <id2> ... [--force] [--permission-request-id <id>]`.
+  When the server returns 202 `waiting_permission` the CLI prints the
+  `permission_request_id` and an `agentv2 permissions approve <id>` recipe
+  (exit code 2), or auto-approves and retries with `--approve`.
 - Frontend: Dashboard → **File Changes** tab; click a row to see the diff and
-  trigger revert.
+  trigger revert. The panel surfaces the 202 `waiting_permission` state with
+  an "Approve and retry" button and distinguishes conflict (409) / forbidden
+  (403) / generic errors per row.
+- End-to-end smoke: `scripts\file-change-smoke.ps1` (PowerShell) /
+  `scripts\file-change-smoke.sh` (Bash) do a real write→list→revert round-trip
+  against a live backend with `AP_ENABLE_TEST_ENDPOINTS=true` and print
+  `FILE_CHANGES=round_trip_validated` only when the on-disk SHA-256 matches
+  the original. They print `FILE_CHANGES=skipped_test_endpoint_disabled`
+  (exit 0) when test endpoints are off.
 
 Every `/code/...` response and every `code.*` tool result now carries these honesty fields so consumers can never mistake a fallback for a real-LSP result:
 

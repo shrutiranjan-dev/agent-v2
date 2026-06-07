@@ -746,7 +746,9 @@ def test_revert_route_happy_path(tmp_path) -> None:
     from backend.app.core.config import get_settings
 
     original_root = get_settings().runtime.workspace_root
+    original_requires_approval = get_settings().file_changes.revert_requires_approval
     get_settings().runtime.workspace_root = tmp_path
+    get_settings().file_changes.revert_requires_approval = False
     try:
         app.dependency_overrides[get_session] = override_get_session
         try:
@@ -756,6 +758,7 @@ def test_revert_route_happy_path(tmp_path) -> None:
             app.dependency_overrides.clear()
     finally:
         get_settings().runtime.workspace_root = original_root
+        get_settings().file_changes.revert_requires_approval = original_requires_approval
 
     assert response.status_code == 200, response.text
     body = response.json()
@@ -803,7 +806,9 @@ def test_revert_route_refuses_redacted(tmp_path) -> None:
     from backend.app.core.config import get_settings
 
     original_root = get_settings().runtime.workspace_root
+    original_requires_approval = get_settings().file_changes.revert_requires_approval
     get_settings().runtime.workspace_root = tmp_path
+    get_settings().file_changes.revert_requires_approval = False
     try:
         app.dependency_overrides[get_session] = override_get_session
         try:
@@ -813,6 +818,7 @@ def test_revert_route_refuses_redacted(tmp_path) -> None:
             app.dependency_overrides.clear()
     finally:
         get_settings().runtime.workspace_root = original_root
+        get_settings().file_changes.revert_requires_approval = original_requires_approval
 
     assert response.status_code == 403
 

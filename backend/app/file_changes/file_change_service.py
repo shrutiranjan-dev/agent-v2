@@ -3,7 +3,10 @@ from __future__ import annotations
 import difflib
 import fnmatch
 import hashlib
-from dataclasses import dataclass
+import json
+import shutil
+import subprocess
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -29,21 +32,96 @@ OPERATION_BY_TOOL = {
     "patch.apply": "patch",
 }
 
+REVERT_PERMISSION_KEY = "file_change.revert"
+MAX_GIT_OUTPUT_BYTES = 1_048_576
+
 
 class FileChangeError(RuntimeError):
     """Raised when a file change capture or revert cannot proceed safely."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str = "file_change_error",
+        status_code: int = 500,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.message = message
+        self.code = code
+        self.status_code = status_code
+        self.details = details or {}
 
-class FileChangeNotRevertible(FileChangeError):
-    """Raised when a change cannot be reverted (secret, missing before_content, etc.)."""
+
+class FileChangeNotFoundError(FileChangeError):
+    """Raised when the requested file change id does not exist."""
+
+    def __init__(self, message: str, *, details: dict[str, Any] | None = None) -> None:
+        super().__init__(message, code="file_change_not_found", status_code=404, details=details)
 
 
-class FileChangeAlreadyReverted(FileChangeError):
-    """Raised when attempting to revert a change that was already reverted."""
+class FileChangeConflictError(FileChangeError):
+    """Raised for hash mismatch, already-reverted, and other conflict-class errors.
+
+    Maps to HTTP 409 in the route handler.
+    """
+
+    def __init__(self, message: str, *, details: dict[str, Any] | None = None) -> None:
+        super().__init__(message, code="file_change_conflict", status_code=409, details=details)
 
 
-class FileChangeHashMismatch(FileChangeError):
-    """Raised when the current file hash does not match the expected hash."""
+class FileChangeForbiddenError(FileChangeError):
+    """Raised when the revert is denied because the file is a secret or outside the workspace."""
+
+    def __init__(self, message: str, *, details: dict[str, Any] | None = None) -> None:
+        super().__init__(message, code="file_change_forbidden", status_code=403, details=details)
+
+
+class FileChangeValidationError(FileChangeError):
+    """Raised for invalid input (unknown operation, missing fields, etc.)."""
+
+    def __init__(self, message: str, *, details: dict[str, Any] | None = None) -> None:
+        super().__init__(message, code="file_change_validation", status_code=422, details=details)
+
+
+class FileChangeSecretRequiresForce(FileChangeConflictError):
+    """Raised when a revert targets a secret-glob file and ``force`` is false.
+
+    Maps to HTTP 409 with a "needs force override" reason, not 403. The file
+    itself is not redacted (so the operator can read the diff and decide
+    whether to retry with ``force=true``); the conflict is between the
+    requested action and the safety policy.
+    """
+
+    def __init__(self, message: str, *, details: dict[str, Any] | None = None) -> None:
+        super().__init__(message, details=details)
+        self.code = "file_change_secret_requires_force"
+
+
+# Backwards-compatible aliases for tests and the old single-revert route.
+class FileChangeNotRevertible(FileChangeConflictError):
+    """Backwards-compatible alias (now maps to 409)."""
+
+    def __init__(self, message: str, *, details: dict[str, Any] | None = None) -> None:
+        super().__init__(message, details=details)
+        self.code = "file_change_not_revertible"
+
+
+class FileChangeAlreadyReverted(FileChangeConflictError):
+    """Backwards-compatible alias (now maps to 409)."""
+
+    def __init__(self, message: str, *, details: dict[str, Any] | None = None) -> None:
+        super().__init__(message, details=details)
+        self.code = "file_change_already_reverted"
+
+
+class FileChangeHashMismatch(FileChangeConflictError):
+    """Backwards-compatible alias (now maps to 409)."""
+
+    def __init__(self, message: str, *, details: dict[str, Any] | None = None) -> None:
+        super().__init__(message, details=details)
+        self.code = "file_change_hash_mismatch"
 
 
 @dataclass
@@ -554,6 +632,118 @@ async def get_file_change(db: AsyncSession, file_change_id: UUID) -> FileChange 
     return await db.get(FileChange, file_change_id)
 
 
+async def _validate_revert_preconditions(
+    row: FileChange,
+    *,
+    workspace_root: Path,
+    force: bool,
+    secret_globs: list[str] | None = None,
+    check_hash: bool = True,
+) -> tuple[Path, str | None]:
+    """Pre-flight checks shared by single and batch revert.
+
+    Returns ``(resolved_path, current_sha256_or_none)``.
+    Raises typed :class:`FileChangeError` subclasses on failure.
+
+    The hash check is opt-out via ``check_hash=False``. Single revert runs
+    with the default; batch revert runs with ``check_hash=False`` so the
+    hash check happens at apply time and a stale-sibling failure can be
+    rolled back rather than rejecting the whole batch upfront.
+    """
+    if row.revert_status == "reverted":
+        raise FileChangeAlreadyReverted(
+            f"File change {row.id} is already reverted.",
+            details={
+                "change_id": str(row.id),
+                "relative_path": row.relative_path,
+                "revert_status": row.revert_status,
+            },
+        )
+    if not row.revertible:
+        raise FileChangeNotRevertible(
+            f"File change {row.id} is not revertible (reason: {row.redaction_reason or 'unknown'}).",
+            details={
+                "change_id": str(row.id),
+                "relative_path": row.relative_path,
+                "redaction_reason": row.redaction_reason,
+            },
+        )
+    if row.redacted:
+        raise FileChangeForbiddenError(
+            f"File change {row.id} cannot be reverted: {row.redaction_reason or 'redacted'}.",
+            details={
+                "change_id": str(row.id),
+                "relative_path": row.relative_path,
+                "redaction_reason": row.redaction_reason,
+            },
+        )
+    inside, resolved = _is_path_within_workspace(row.resolved_path, workspace_root)
+    if not inside or resolved is None:
+        raise FileChangeForbiddenError(
+            f"File change {row.id} path is outside the workspace root.",
+            details={
+                "change_id": str(row.id),
+                "relative_path": row.relative_path,
+                "resolved_path": row.resolved_path,
+            },
+        )
+    if secret_globs and _is_secret_filename(row.relative_path, secret_globs):
+        raise FileChangeSecretRequiresForce(
+            f"File change {row.id} matches a secret filename pattern; use force=true to override.",
+            details={
+                "change_id": str(row.id),
+                "relative_path": row.relative_path,
+            },
+        )
+    if check_hash and not force and row.after_sha256:
+        try:
+            current_hash: str | None = (
+                _file_sha256(resolved) if resolved.exists() else None
+            )
+        except OSError as exc:
+            raise FileChangeHashMismatch(
+                f"Cannot hash current file {resolved}: {exc}",
+                details={
+                    "change_id": str(row.id),
+                    "relative_path": row.relative_path,
+                },
+            ) from exc
+        if current_hash is None:
+            raise FileChangeHashMismatch(
+                f"Current file missing: {resolved} (use force=true to overwrite).",
+                details={
+                    "change_id": str(row.id),
+                    "relative_path": row.relative_path,
+                    "expected_after_sha256": row.after_sha256,
+                },
+            )
+        if current_hash != row.after_sha256:
+            raise FileChangeHashMismatch(
+                f"Current file hash does not match recorded after_sha256 for file change {row.id}.",
+                details={
+                    "change_id": str(row.id),
+                    "relative_path": row.relative_path,
+                    "expected_after_sha256": row.after_sha256,
+                    "current_sha256": current_hash,
+                },
+            )
+        return resolved, current_hash
+    return resolved, None
+
+
+def _is_path_within_workspace(
+    resolved_path: str,
+    workspace_root: Path,
+) -> tuple[bool, Path | None]:
+    try:
+        candidate = Path(resolved_path)
+    except (TypeError, ValueError):
+        return False, None
+    if not is_inside(workspace_root, candidate):
+        return False, None
+    return True, candidate
+
+
 async def revert_file_change(
     db: AsyncSession,
     *,
@@ -562,58 +752,117 @@ async def revert_file_change(
     actor_user_id: UUID | None,
     tool_call_id: UUID | None = None,
     force: bool = False,
+    permission_request_id: UUID | None = None,
+    secret_globs: list[str] | None = None,
+    git_fallback_enabled: bool = True,
 ) -> FileChange:
     row = await get_file_change(db, file_change_id)
     if row is None:
-        raise FileChangeError(f"File change not found: {file_change_id}")
-    if row.revert_status == "reverted":
-        raise FileChangeAlreadyReverted(f"File change {file_change_id} is already reverted.")
-    if not row.revertible:
-        raise FileChangeNotRevertible(
-            f"File change {file_change_id} is not revertible (reason: {row.redaction_reason or 'unknown'})."
+        raise FileChangeNotFoundError(
+            f"File change not found: {file_change_id}",
+            details={"change_id": str(file_change_id)},
         )
-    if row.redacted:
-        raise FileChangeNotRevertible(
-            f"File change {file_change_id} cannot be reverted: {row.redaction_reason or 'redacted'}."
-        )
-    resolved = Path(row.resolved_path)
-    if not is_inside(workspace_root, resolved):
-        raise FileChangeNotRevertible(
-            f"File change {file_change_id} path is outside the workspace root."
-        )
+    await event_bus.publish(
+        db,
+        organization_id=row.organization_id,
+        project_id=row.project_id,
+        workspace_id=row.workspace_id,
+        session_id=row.session_id,
+        agent_run_id=row.agent_run_id,
+        tool_call_id=row.tool_call_id,
+        event_type=EventType.FILE_CHANGE_REVERT_REQUESTED,
+        payload={
+            "id": str(row.id),
+            "file_change_id": str(row.id),
+            "relative_path": row.relative_path,
+            "force": bool(force),
+            "permission_request_id": str(permission_request_id) if permission_request_id else None,
+        },
+    )
+    resolved, _current_hash = await _validate_revert_preconditions(
+        row,
+        workspace_root=workspace_root,
+        force=force,
+        secret_globs=secret_globs,
+    )
 
+    # Re-check the on-disk hash immediately before applying. This catches a
+    # race where another writer (or a previous sibling in a batch) mutated
+    # the file between the precondition and the apply step. Skipped when
+    # ``force`` is set, when the recorded ``after_sha256`` is missing, or
+    # when the caller already checked the hash (e.g. a batch that has its
+    # own pre-flight).
     if not force and row.after_sha256:
         try:
-            current_hash = _file_sha256(resolved) if resolved.exists() else None
+            current_hash: str | None = (
+                _file_sha256(resolved) if resolved.exists() else None
+            )
         except OSError as exc:
-            raise FileChangeHashMismatch(f"Cannot hash current file {resolved}: {exc}") from exc
+            raise FileChangeHashMismatch(
+                f"Cannot hash current file {resolved}: {exc}",
+                details={
+                    "change_id": str(row.id),
+                    "relative_path": row.relative_path,
+                },
+            ) from exc
         if current_hash is None:
             raise FileChangeHashMismatch(
-                f"Current file missing: {resolved} (use force=true to overwrite)."
+                f"Current file missing: {resolved} (use force=true to overwrite).",
+                details={
+                    "change_id": str(row.id),
+                    "relative_path": row.relative_path,
+                    "expected_after_sha256": row.after_sha256,
+                },
             )
         if current_hash != row.after_sha256:
             raise FileChangeHashMismatch(
-                f"Current file hash does not match recorded after_sha256 for file change {file_change_id}."
+                f"Current file hash does not match recorded after_sha256 for file change {row.id}.",
+                details={
+                    "change_id": str(row.id),
+                    "relative_path": row.relative_path,
+                    "expected_after_sha256": row.after_sha256,
+                    "current_sha256": current_hash,
+                },
             )
+
+    # Resolve the content to restore. If before_content is missing (e.g. it
+    # was truncated or the capture predated the on-disk snapshot), fall back
+    # to git HEAD. The fallback never returns content for secret files: those
+    # are filtered out by the precondition check above.
+    restore_source = "stored_snapshot"
+    restore_content = row.before_content
+    if restore_content is None and row.operation != "add" and git_fallback_enabled:
+        git_payload = restore_from_git_head(workspace_root, row.relative_path)
+        if git_payload is not None:
+            restore_content, _ = git_payload
+            restore_source = "git_head"
 
     try:
         if row.operation == "delete":
-            if row.before_content is None:
+            if restore_content is None:
                 raise FileChangeNotRevertible(
-                    f"File change {file_change_id} has no before_content recorded; cannot restore deleted file."
+                    f"File change {row.id} has no before_content recorded and git HEAD is unavailable.",
+                    details={
+                        "change_id": str(row.id),
+                        "relative_path": row.relative_path,
+                    },
                 )
             resolved.parent.mkdir(parents=True, exist_ok=True)
-            atomic_write_text(resolved, row.before_content)
+            atomic_write_text(resolved, restore_content)
         elif row.operation == "add":
             if resolved.exists() or resolved.is_symlink():
                 resolved.unlink()
         else:
-            if row.before_content is None:
+            if restore_content is None:
                 raise FileChangeNotRevertible(
-                    f"File change {file_change_id} has no before_content recorded; cannot restore."
+                    f"File change {row.id} has no before_content recorded and git HEAD is unavailable.",
+                    details={
+                        "change_id": str(row.id),
+                        "relative_path": row.relative_path,
+                    },
                 )
-            atomic_write_text(resolved, row.before_content)
-    except FileChangeNotRevertible:
+            atomic_write_text(resolved, restore_content)
+    except FileChangeError:
         raise
     except Exception as exc:
         row.revert_status = "revert_failed"
@@ -636,13 +885,23 @@ async def revert_file_change(
                 "error": row.revert_error,
             },
         )
-        raise FileChangeError(f"Revert failed for {file_change_id}: {exc}") from exc
+        raise FileChangeError(
+            f"Revert failed for {row.id}: {exc}",
+            details={
+                "change_id": str(row.id),
+                "relative_path": row.relative_path,
+            },
+        ) from exc
 
     row.revert_status = "reverted"
     row.reverted_at = datetime.now(UTC)
     row.reverted_by_user_id = actor_user_id
     row.revert_tool_call_id = tool_call_id
     row.revert_error = None
+    if restore_source != "stored_snapshot":
+        metadata = dict(row.metadata_json or {})
+        metadata["restore_source"] = restore_source
+        row.metadata_json = metadata
     await db.flush()
     await event_bus.publish(
         db,
@@ -661,9 +920,183 @@ async def revert_file_change(
             "relative_path": row.relative_path,
             "tool_call_id": str(tool_call_id) if tool_call_id else None,
             "forced": bool(force),
+            "restore_source": restore_source,
+            "permission_request_id": str(permission_request_id) if permission_request_id else None,
         },
     )
     return row
+
+
+@dataclass
+class BatchRevertResult:
+    """Per-change and aggregate result of a batch revert.
+
+    ``reverted`` is a list of file change ids that were applied; ``skipped``
+    is the list of ids that were rejected before any mutation (validate-all-
+    before-apply); ``failed`` is the list of ids whose on-disk write raised
+    while a prior sibling had already been applied (atomic rollback restores
+    their pre-batch state in this case).
+    """
+
+    reverted: list[UUID] = field(default_factory=list)
+    skipped: list[dict[str, Any]] = field(default_factory=list)
+    failed: list[dict[str, Any]] = field(default_factory=list)
+    restored_from_snapshots: bool = False
+    error: str | None = None
+
+
+async def revert_file_changes_batch(
+    db: AsyncSession,
+    *,
+    file_change_ids: list[UUID],
+    workspace_root: Path,
+    actor_user_id: UUID | None,
+    force: bool = False,
+    permission_request_id: UUID | None = None,
+    secret_globs: list[str] | None = None,
+    git_fallback_enabled: bool = True,
+) -> BatchRevertResult:
+    """Atomically revert a list of file changes.
+
+    Semantics:
+    1. Validate every change. If any one is unsafe (not found, already
+       reverted, hash mismatch, secret, outside workspace), reject the
+       whole batch and mutate nothing.
+    2. Snapshot the on-disk state of every file we are about to touch so
+       we can roll back atomically.
+    3. Apply each revert. If a later revert raises, restore every snapshot
+       we captured and mark the batch as ``failed`` with the offending id.
+    4. Return a :class:`BatchRevertResult` describing what happened.
+
+    The on-disk snapshot is only used to roll back a partially-applied
+    batch. The revert itself restores the recorded ``before_content``
+    (or ``git_head`` for a missing snapshot); it does not depend on the
+    snapshot capturing the original pre-batch content.
+    """
+    result = BatchRevertResult()
+    if not file_change_ids:
+        return result
+    if len(file_change_ids) > 100:
+        raise FileChangeValidationError(
+            "Batch revert is limited to 100 file changes per call.",
+            details={"requested": len(file_change_ids), "limit": 100},
+        )
+
+    seen: set[UUID] = set()
+    deduped_ids: list[UUID] = []
+    for fid in file_change_ids:
+        if fid in seen:
+            continue
+        seen.add(fid)
+        deduped_ids.append(fid)
+
+    # Phase 1: validate every change. If any is unsafe, do not mutate.
+    # Note: the hash check is intentionally skipped here; the actual
+    # ``revert_file_change`` re-checks the hash at apply time so a stale
+    # sibling can be rolled back instead of rejecting the whole batch.
+    rows: list[FileChange] = []
+    for fid in deduped_ids:
+        row = await get_file_change(db, fid)
+        if row is None:
+            result.skipped.append(
+                {
+                    "change_id": str(fid),
+                    "reason": "not_found",
+                    "error": f"File change not found: {fid}",
+                }
+            )
+            continue
+        try:
+            await _validate_revert_preconditions(
+                row,
+                workspace_root=workspace_root,
+                force=force,
+                secret_globs=secret_globs,
+                check_hash=False,
+            )
+        except FileChangeError as exc:
+            result.skipped.append(
+                {
+                    "change_id": str(row.id),
+                    "relative_path": row.relative_path,
+                    "reason": exc.code,
+                    "error": exc.message,
+                    "details": exc.details,
+                }
+            )
+            continue
+        rows.append(row)
+
+    if any(entry["reason"] != "not_found" for entry in result.skipped) or (
+        result.skipped and not rows
+    ):
+        # at least one precondition failed; the batch is rejected as a whole.
+        return result
+
+    # Phase 2: snapshot on-disk state for atomic rollback.
+    snapshots: dict[Path, tuple[bool, bytes | None]] = {}
+    for row in rows:
+        target = Path(row.resolved_path)
+        try:
+            existed = target.exists() or target.is_symlink()
+            data = target.read_bytes() if existed else None
+        except OSError:
+            existed = False
+            data = None
+        snapshots[target] = (existed, data)
+
+    # Phase 3: apply each revert. On any failure, roll back.
+    for row in rows:
+        try:
+            await revert_file_change(
+                db,
+                file_change_id=row.id,
+                workspace_root=workspace_root,
+                actor_user_id=actor_user_id,
+                force=force,
+                permission_request_id=permission_request_id,
+                secret_globs=secret_globs,
+                git_fallback_enabled=git_fallback_enabled,
+            )
+            result.reverted.append(row.id)
+        except FileChangeError as exc:
+            # Roll back every prior revert in this batch.
+            for previous in rows:
+                if previous.id in result.reverted:
+                    target = Path(previous.resolved_path)
+                    existed, data = snapshots.get(target, (False, None))
+                    try:
+                        if existed and data is not None:
+                            target.parent.mkdir(parents=True, exist_ok=True)
+                            atomic_write_text(target, data.decode("utf-8", errors="replace"))
+                        elif existed:
+                            # Snapshot was the existence of a symlink/special
+                            # file. We did not capture its bytes, so the
+                            # safest we can do is delete the file we
+                            # created during revert. This is rare.
+                            if target.exists() or target.is_symlink():
+                                target.unlink()
+                    except OSError:
+                        pass
+                    try:
+                        previous.revert_status = "revert_failed"
+                        previous.revert_error = f"rolled_back_due_to:{exc.code}"
+                        await db.flush()
+                    except Exception:
+                        pass
+            result.restored_from_snapshots = True
+            result.failed.append(
+                {
+                    "change_id": str(row.id),
+                    "relative_path": row.relative_path,
+                    "reason": exc.code,
+                    "error": exc.message,
+                }
+            )
+            result.error = exc.message
+            return result
+
+    return result
 
 
 def serialize_file_change(row: FileChange, *, include_content: bool = True) -> dict[str, Any]:
@@ -720,8 +1153,98 @@ def file_change_settings_snapshot() -> dict[str, Any]:
         "capture_diff": bool(fc.capture_diff),
         "max_content_bytes": int(fc.max_content_bytes),
         "max_diff_bytes": int(fc.max_diff_bytes),
+        "revert_requires_approval": bool(fc.revert_requires_approval),
+        "git_fallback_enabled": bool(fc.git_fallback_enabled),
         "secret_filename_globs": list(fc.secret_filename_globs),
     }
+
+
+def compute_approval_nonce(
+    *,
+    file_change_id: UUID | str,
+    relative_path: str,
+    expected_after_sha256: str | None,
+    force: bool,
+) -> str:
+    """Deterministic nonce bound to a revert request.
+
+    Approval requests carry this nonce in their metadata so the resume path
+    can reject any attempt to reuse an approval for a different file change,
+    a different target path, a different on-disk hash, or a different force
+    flag. Bypassing the hash check, the secret check, or the workspace-root
+    check via a stale approval is therefore not possible.
+    """
+    payload = {
+        "file_change_id": str(file_change_id),
+        "relative_path": relative_path,
+        "expected_after_sha256": expected_after_sha256,
+        "force": bool(force),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _is_path_inside(workspace_root: Path, relative_path: str) -> tuple[bool, Path | None]:
+    """Resolve a relative path safely inside the workspace root.
+
+    Refuses absolute paths, parent traversal, and any resolved path that
+    escapes the workspace root.
+    """
+    if not isinstance(relative_path, str) or not relative_path:
+        return False, None
+    if "\\" in relative_path or relative_path.startswith("/") or relative_path.startswith("~"):
+        return False, None
+    raw = Path(relative_path)
+    if raw.is_absolute():
+        return False, None
+    parts = raw.parts
+    if any(part in ("..",) for part in parts):
+        return False, None
+    resolved = (workspace_root / raw).resolve(strict=False)
+    if not is_inside(workspace_root, resolved):
+        return False, None
+    return True, resolved
+
+
+def restore_from_git_head(
+    workspace_root: Path,
+    relative_path: str,
+    *,
+    git_executable: str | None = None,
+) -> tuple[str, int] | None:
+    """Read `<relative_path>` from `git -C <workspace_root> show HEAD:<path>`.
+
+    Returns ``(content, size_bytes)`` on success, or ``None`` if the path
+    is not tracked in HEAD, the file is absent, or git is unavailable.
+
+    Safety:
+    - Never uses a shell. The git command is always invoked as a list.
+    - The relative path is normalized and validated against workspace-root
+      traversal (absolute paths, ``..``, backslashes, and ``~`` are rejected).
+    - Output is capped at ``MAX_GIT_OUTPUT_BYTES``.
+    """
+    inside, resolved = _is_path_inside(workspace_root, relative_path)
+    if not inside or resolved is None:
+        return None
+    git = git_executable or shutil.which("git")
+    if not git:
+        return None
+    try:
+        completed = subprocess.run(
+            [git, "-C", str(workspace_root.resolve(strict=False)), "show", f"HEAD:{relative_path}"],
+            capture_output=True,
+            check=False,
+            shell=False,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if completed.returncode != 0:
+        return None
+    data = completed.stdout or b""
+    if len(data) > MAX_GIT_OUTPUT_BYTES:
+        return None
+    return data.decode("utf-8", errors="replace"), len(data)
 
 
 async def capture_from_tool_call(

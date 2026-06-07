@@ -525,9 +525,25 @@ export const api = {
     const search = new URLSearchParams({ include_content: String(includeContent) });
     return request<{ file_change: FileChange }>(`/file-changes/${id}?${search.toString()}`);
   },
-  revertFileChange: (id: string, force = false) =>
+  revertFileChange: (id: string, force = false, permissionRequestId?: string) =>
     request<{ file_change: FileChange }>(`/file-changes/${id}/revert`, {
       method: "POST",
-      body: JSON.stringify({ force })
-    })
+      body: JSON.stringify({ force, ...(permissionRequestId ? { permission_request_id: permissionRequestId } : {}) })
+    }),
+  revertFileChangesBatch: (
+    changeIds: string[],
+    force = false,
+    permissionRequestId?: string
+  ) =>
+    request<{ reverted: string[]; skipped: unknown[]; failed: unknown[]; restored_from_snapshots: boolean }>(
+      "/file-changes/revert-batch",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          change_ids: changeIds,
+          force,
+          ...(permissionRequestId ? { permission_request_id: permissionRequestId } : {})
+        })
+      }
+    )
 };

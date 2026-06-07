@@ -49,6 +49,12 @@ minio-data/
 clickhouse-data/
 ollama-data/
 
+# Local SQLite databases created by ad-hoc smoke runs (e.g. AP_DATABASE_URL=sqlite+aiosqlite:///./agent-platform.db)
+agent-platform.db
+backend/agent-platform.db
+*.sqlite
+*.sqlite3
+
 # Windows
 Thumbs.db
 Desktop.ini

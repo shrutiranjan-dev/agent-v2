@@ -235,14 +235,68 @@ def changes_show(file_change_id: str) -> None:
 def changes_revert(
     file_change_id: str = typer.Argument(..., help="File change id to revert."),
     force: bool = typer.Option(False, "--force", help="Allow revert for secret-like files and skip hash check."),
+    permission_request_id: str | None = typer.Option(
+        None,
+        "--permission-request-id",
+        help="Approved permission request id; required when the server returns 202 waiting_permission.",
+    ),
+    approve_waiting: bool = typer.Option(
+        False,
+        "--approve",
+        help="Auto-approve a waiting_permission response and retry the revert.",
+    ),
 ) -> None:
-    """Revert a recorded file change, restoring the prior content when possible."""
+    """Revert a recorded file change, restoring the prior content when possible.
+
+    If the server requires approval, the request returns 202 with a
+    ``permission_request_id``. Pass ``--approve`` to auto-approve the
+    pending request and retry the revert with the new id; otherwise the
+    permission id is printed so the operator can approve it separately
+    via ``agentv2 permissions ...``.
+    """
     with _client() as client:
         try:
-            row = client.revert_file_change(file_change_id, force=force)
+            row = client.revert_file_change(
+                file_change_id,
+                force=force,
+                permission_request_id=permission_request_id,
+            )
         except CliApiError as exc:
-            console.print(render_error(exc))
-            raise typer.Exit(code=1) from exc
+            if exc.status_code == 202 and approve_waiting:
+                permission_id = _extract_permission_request_id(str(exc))
+                if not permission_id:
+                    console.print(render_error(exc))
+                    raise typer.Exit(code=1) from exc
+                console.print(f"[yellow]Revert requires approval; approving {permission_id}...[/yellow]")
+                try:
+                    client.approve_permission(permission_id, message="cli_approval")
+                except CliApiError as approve_exc:
+                    console.print(render_error(approve_exc))
+                    raise typer.Exit(code=1) from approve_exc
+                try:
+                    row = client.revert_file_change(
+                        file_change_id,
+                        force=force,
+                        permission_request_id=permission_id,
+                    )
+                except CliApiError as retry_exc:
+                    console.print(render_error(retry_exc))
+                    raise typer.Exit(code=1) from retry_exc
+            else:
+                if exc.status_code == 202:
+                    permission_id = _extract_permission_request_id(str(exc))
+                    if permission_id:
+                        console.print(
+                            f"[yellow]Revert is waiting for approval "
+                            f"(permission_request_id={permission_id}).[/yellow]"
+                        )
+                        console.print(
+                            f"Approve with: [cyan]agentv2 permissions approve {permission_id}[/cyan] "
+                            f"or retry with [cyan]--permission-request-id {permission_id}[/cyan]."
+                        )
+                        raise typer.Exit(code=2) from exc
+                console.print(render_error(exc))
+                raise typer.Exit(code=1) from exc
         if not row:
             console.print(f"[red]File change {file_change_id} not found.[/red]")
             raise typer.Exit(code=1)
@@ -252,6 +306,70 @@ def changes_revert(
                 f"[yellow]Revert reported status={row.get('revert_status')}; "
                 f"check revert_error for details.[/yellow]"
             )
+
+
+@changes_app.command("revert-batch")
+def changes_revert_batch(
+    file_change_ids: list[str] = typer.Argument(..., help="File change ids to revert (space separated)."),
+    force: bool = typer.Option(False, "--force", help="Allow revert for secret-like files and skip hash check."),
+    permission_request_id: str | None = typer.Option(
+        None,
+        "--permission-request-id",
+        help="Approved permission request id; required when the server returns 202 waiting_permission.",
+    ),
+) -> None:
+    """Revert multiple file changes atomically (validate-all-before-apply)."""
+    with _client() as client:
+        try:
+            result = client.revert_file_changes_batch(
+                file_change_ids,
+                force=force,
+                permission_request_id=permission_request_id,
+            )
+        except CliApiError as exc:
+            if exc.status_code == 202:
+                permission_id = _extract_permission_request_id(str(exc))
+                if permission_id:
+                    console.print(
+                        f"[yellow]Batch revert is waiting for approval "
+                        f"(permission_request_id={permission_id}).[/yellow]"
+                    )
+                    console.print(
+                        f"Approve with: [cyan]agentv2 permissions approve {permission_id}[/cyan] "
+                        f"or retry with [cyan]--permission-request-id {permission_id}[/cyan]."
+                    )
+                    raise typer.Exit(code=2) from exc
+            console.print(render_error(exc))
+            raise typer.Exit(code=1) from exc
+        reverted = result.get("reverted") or []
+        skipped = result.get("skipped") or []
+        failed = result.get("failed") or []
+        console.print(
+            f"[green]Batch revert ok: reverted={len(reverted)} skipped={len(skipped)} "
+            f"failed={len(failed)} restored_from_snapshots={result.get('restored_from_snapshots', False)}[/green]"
+        )
+        for entry in skipped:
+            console.print(
+                f"[yellow]SKIP {entry.get('change_id', '?')} ({entry.get('reason', '?')}): "
+                f"{entry.get('error', '')}[/yellow]"
+            )
+        for entry in failed:
+            console.print(
+                f"[red]FAIL {entry.get('change_id', '?')} ({entry.get('reason', '?')}): "
+                f"{entry.get('error', '')}[/red]"
+            )
+
+
+def _extract_permission_request_id(message: str) -> str | None:
+    import re
+
+    match = re.search(
+        r"permission_request_id[\"']?\s*[:=]\s*[\"']?([0-9a-fA-F-]{36})",
+        message,
+    )
+    if match:
+        return match.group(1)
+    return None
 
 
 @app.command()

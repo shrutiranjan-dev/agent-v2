@@ -60,6 +60,15 @@ class FakeAsyncSession:
     async def commit(self) -> None:
         self.committed = True
 
+    async def rollback(self) -> None:
+        self.committed = False
+        self.added = []
+        self.objects = {
+            key: value
+            for key, value in self.objects.items()
+            if key not in {(type(row), row.id) for row in self.added}
+        }
+
     def _assign_defaults(self, row: Any) -> None:
         if hasattr(row, "id") and getattr(row, "id", None) is None:
             row.id = uuid4()

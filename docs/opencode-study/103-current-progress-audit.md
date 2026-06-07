@@ -1,7 +1,7 @@
 # Current Progress Audit — OpenCode-Style 1:1 Core Coding Agent Parity
 
 - **Audit date:** 2026-06-07
-- **Head commit:** `9c37143` ("Flip CI_CI_VALIDATED to true for file-change batch 170506f")
+- **Head commit:** see `git log -1 --format=%H` on the head of the next push (post-Batch 2)
 - **Reference source:** `external/opencode-source`
 - **Audit mode:** evidence-only, no runtime/backend/frontend code modified
 - **Auditor role:** strict senior technical auditor / OpenCode parity reviewer / release QA lead / product architect
@@ -13,13 +13,13 @@
 
 | Marker | Value |
 |---|---|
-| **Core OpenCode-style parity (weighted, this audit)** | **79.60%** (after verifier hardening; was 79.20% before) |
-| **Remaining core work** | **~21%** |
+| **Core OpenCode-style parity (weighted, this audit)** | **82.40%** (after File Diff / Review / Undo Batch 2; was 79.60% before) |
+| **Remaining core work** | **~18%** |
 | **Future expansion readiness (GitHub bot + browser/mobile/workflow builder)** | **~4.5%** |
 | **Largest parity gaps inside core** | Memory/compaction (live evidence), Web UI (no frontend tests), MCP/plugin (no HTTP/SSE/OAuth), Artifact/report (no signed downloads), Model/provider (no embeddings / token-cost), Project config (per-workspace/per-agent) |
 | **Largest future expansion gap** | GitHub bot/workflow (18% per the existing matrix) |
-| **Biggest current blocker** | Revert approval gate + 409 contract fix + end-to-end file-change round-trip smoke (file-change Batch 2) |
-| **Recommended next batch** | File Diff / Review / Undo Batch 2 (closes the file-change gap to 95% and is mostly self-contained). The `check-github-actions.ps1` polling bug is **RESOLVED** in the verifier-hardening batch. |
+| **Biggest current blocker** | Frontend test coverage (sessions, permissions, file changes, memory). File Diff / Review / Undo Batch 2 is **DONE**. |
+| **Recommended next batch** | Frontend Vitest + React Testing Library smoke covering sessions, permissions, file changes, and memory (or memory/compaction live evidence). The file-change gap is closed to 95%+. |
 | **Should NOT start next** | GitHub bot, browser automation, mobile automation, workflow builder, full multi-cloud provider routing |
 
 This audit does not inflate the score. Several categories that *look* strong on paper (tool system, LSP, permissions, file changes) have specific contract bugs or missing validation that prevents a score above 90. The weighted number reflects the missing pieces.

@@ -8,6 +8,7 @@ from backend.app.api.routes_agents import router as agents_router
 from backend.app.api.routes_artifacts import router as artifacts_router
 from backend.app.api.routes_codeintel import router as codeintel_router
 from backend.app.api.routes_file_changes import router as file_changes_router
+from backend.app.api.routes_file_changes import test_router as file_changes_test_router
 from backend.app.api.routes_health import router as health_router
 from backend.app.api.routes_human_input import router as human_input_router
 from backend.app.api.routes_mcp import router as mcp_router
@@ -65,6 +66,8 @@ def create_app() -> FastAPI:
     app.include_router(plugins_router)
     app.include_router(artifacts_router)
     app.include_router(file_changes_router)
+    if settings.app.enable_test_endpoints:
+        app.include_router(file_changes_test_router)
     app.include_router(system_events_router)
     app.include_router(websocket_router)
     return app

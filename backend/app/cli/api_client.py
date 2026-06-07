@@ -171,13 +171,33 @@ class AgentApiClient(AbstractContextManager["AgentApiClient"]):
         file_change_id: str,
         *,
         force: bool = False,
+        permission_request_id: str | None = None,
     ) -> dict[str, Any]:
+        body: dict[str, Any] = {"force": force}
+        if permission_request_id is not None:
+            body["permission_request_id"] = permission_request_id
         payload = self._request(
             "POST",
             f"/file-changes/{file_change_id}/revert",
-            json={"force": force},
+            json=body,
         )
         return dict(payload.get("file_change", {}))
+
+    def revert_file_changes_batch(
+        self,
+        change_ids: list[str],
+        *,
+        force: bool = False,
+        permission_request_id: str | None = None,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {"change_ids": change_ids, "force": force}
+        if permission_request_id is not None:
+            body["permission_request_id"] = permission_request_id
+        return self._request(
+            "POST",
+            "/file-changes/revert-batch",
+            json=body,
+        )
 
     def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
         try:

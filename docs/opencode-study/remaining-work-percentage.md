@@ -1,9 +1,9 @@
 # Remaining Work to 80% / 90% / 95% Core Parity
 
 **Audit date:** 2026-06-07
-**Head commit:** `9c37143e1ac6dac6a1e6e1fac4b2c12ecf33886d`
-**Current weighted core OpenCode-style parity:** **79.60%** (post-verifier-hardening; was 79.20% before)
-**Remaining core work:** **20.40%** of weighted core
+**Head commit:** see `git log -1 --format=%H` on the head of the next push (post-File-Diff-Batch-2)
+**Current weighted core OpenCode-style parity:** **82.40%** (post-File-Diff-Batch-2; was 79.60% before)
+**Remaining core work:** **17.60%** of weighted core
 **Future expansion readiness:** **4.5%** (GitHub bot 0%, browser/mobile 0%, workflow builder 0% — excluded from core score)
 
 Source: `current-parity-scorecard.json`, `103-current-progress-audit.md`.

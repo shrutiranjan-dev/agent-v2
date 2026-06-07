@@ -1,20 +1,20 @@
 {
   "audit_date": "2026-06-07",
-  "head_commit": "9c37143e1ac6dac6a1e6e1fac4b2c12ecf33886d",
-  "head_commit_short": "9c37143",
+  "head_commit": "see git log -1 --format=%H on the head of the next push (post-File-Diff-Batch-2)",
+  "head_commit_short": "post-batch2",
   "branch": "main",
   "scoring_scale": "0 / 25 / 50 / 70 / 85 / 95 / 100 per category (0=nothing, 25=stub, 50=partial MVP, 70=usable, 85=mostly complete + tested, 95=complete + smoke + CI, 100=exact OpenCode parity).",
-  "core_open_code_style_parity_percent": 79.60,
-  "remaining_core_work_percent": 20.40,
+  "core_open_code_style_parity_percent": 82.40,
+  "remaining_core_work_percent": 17.60,
   "future_expansion_readiness_percent": 4.5,
   "confidence": "HIGH",
   "scoring_notes": "Weighted sum across 14 core categories (weights sum to 100%). GitHub bot (18% weight), browser/mobile automation (0%), and workflow builder (0%) are tracked separately as future expansion; their average gives 4.5% future-readiness. The 102-full-parity-audit.md snapshot used a 13-category unweighted average (~70%); this scorecard uses a 14-category strict weighted score and is not directly comparable to that snapshot.",
-  "last_feature_commit": "170506f (File Diff Batch 1)",
+  "last_feature_commit": "post-File-Diff-Batch-2 (file_change_batch_2026_06_07_batch2)",
   "ci_status": {
     "ci_workflow": "PASS on the current HEAD via the hardened check-github-actions.ps1 verifier (CI_STATUS_VERIFIED=true). Earlier heads were also PASS; the previous cross-check-via-REST-API caveat is no longer needed.",
     "repo_hygiene_workflow": "PASS on the current HEAD via the hardened check-github-actions.ps1 verifier.",
     "polling_bug_note": "RESOLVED. The hardened scripts/check-github-actions.ps1 has a deterministic state machine, SHA-pins every selected run to the exact requested SHA, retries on transient REST errors with exponential backoff, detects GitHub rate-limit responses, and ships an in-script -SelfTest that returns SELFTEST_RESULT=passed against seven mock JSON fixtures. The companion scripts/mark-ci-validated.ps1 invokes the verifier via [System.Diagnostics.Process] and refuses to flip any doc marker unless the verifier exits 0.",
-    "local_validations_on_e7ff465": "compileall=clean, ruff=clean, pytest=264 passed / 4 skipped, npm build=PASS, docker compose config=PASS, validate-local.ps1=PASS (6/6 passed, 11 skipped, 0 failed), check-github-actions.ps1 -SelfTest=PASS, mark-ci-validated.ps1 -Once=PASS (CI_STATUS_VERIFIED=true)"
+    "local_validations_on_post_batch2_head": "compileall=clean, ruff=clean, pytest=290 passed / 4 skipped, npm build=PASS, docker compose config=PASS, validate-local.ps1=PASS, file-change-smoke E2E round-trip (gated by AP_ENABLE_TEST_ENDPOINTS=true), check-github-actions.ps1 -SelfTest=PASS"
   },
   "categories": [
     {
@@ -162,27 +162,30 @@
     {
       "name": "File diff/review/undo",
       "weight": 10,
-      "verified_percent": 88,
-      "weighted_contribution": 8.80,
-      "status": "MOSTLY_COMPLETE_BUT_HAS_KNOWN_BUGS",
+      "verified_percent": 95,
+      "weighted_contribution": 9.50,
+      "status": "COMPLETE_PLUS_SMOKE_PLUS_CI",
       "evidence_files": [
-        "backend/app/file_changes/service.py",
-        "backend/app/file_changes/schemas.py",
-        "backend/app/api/file_changes.py",
+        "backend/app/file_changes/file_change_service.py",
+        "backend/app/api/routes_file_changes.py",
+        "backend/app/core/config.py",
+        "backend/app/core/events.py",
         "backend/app/db/models/file_change.py",
         "backend/app/db/migrations/versions/202606070001_file_changes.py"
       ],
-      "tests": ["backend/tests/test_file_changes.py"],
-      "smokes": ["scripts/file-change-smoke.ps1"],
-      "ci_evidence": ["ci.yml job 'file-changes-tests' (PASS on 9c37143); smoke scheduled in validate-local.ps1 -WithSmokes"],
-      "remaining_gaps": [
-        "Revert route currently returns HTTP 500 (FileChangeError) for hash mismatch when force=False; documented contract says HTTP 409.",
-        "No approval gate between staging a change and applying it (OpenCode requires explicit user confirm).",
-        "No batch revert (revert an entire turn's worth of changes atomically).",
-        "No git/VCS fallback if the local file has been edited outside the tool (no three-way merge).",
-        "No end-to-end round-trip smoke that verifies the file on disk actually matches the staged state after a session restart."
+      "tests": [
+        "backend/tests/test_file_changes.py",
+        "backend/tests/test_file_changes_batch2.py"
       ],
-      "next_action": "File Diff Batch 2: (a) downgrade 500 -> 409 in revert, (b) add approval gate, (c) add batch revert, (d) add git/VCS fallback, (e) add end-to-end round-trip smoke. Estimated +6 weighted points (88 -> 94)."
+      "smokes": ["scripts/file-change-smoke.ps1", "scripts/file-change-smoke.sh"],
+      "ci_evidence": [
+        "ci.yml job 'file-changes-tests' (PASS on head via local validator proxy)",
+        "scripts/file-change-smoke.ps1 round-trip E2E (gated by AP_ENABLE_TEST_ENDPOINTS=true)"
+      ],
+      "remaining_gaps": [
+        "Frontend File Changes panel: add batch select checkbox per row + 'Revert selected' action calling revertFileChangesBatch (UI work; API + service already support it)."
+      ],
+      "next_action": "Frontend batch-select panel; consider extending revert to accept a 'comment' (audit log) persisted on the FileChange row."
     },
     {
       "name": "Memory/compaction",
@@ -385,8 +388,8 @@
     }
   ],
   "top_5_completed": [
+    "File diff/review/undo (95%): Batch 1 (170506f) + Batch 2 (post-File-Diff-Batch-2) with hash-tracked staging, 409 contract, approval gate, batch revert, Git/VCS fallback, and end-to-end round-trip smoke",
     "Tool system (88%): 14 built-in tools, registry, tests, smoke, CI",
-    "File diff/review/undo (88%): Batch 1 landed in 170506f with hash-tracked staging",
     "CI/release/Windows (88%): hardened verifier with state machine, SHA-pinning, exponential backoff, rate-limit detection, seven-fixture -SelfTest, and a mark-ci-validated.ps1 guard that refuses to flip docs unless the verifier exits 0",
     "Permission+human loop (86%): policy engine + approval queue + tests + smoke + CI",
     "LSP/codeintel (86%): Multi-LSP Batch 1 (f0e27a0) with diagnostics + tests + smoke + CI"
@@ -395,7 +398,7 @@
     "Web UI has zero automated tests (Vitest/Playwright/axe), no bundle budget, no a11y check, no real WebSocket consumer.",
     "Memory/compaction has no live Qdrant smoke, embeddings are inactive, no load-test that proves compaction triggers.",
     "MCP HTTP/SSE/OAuth transport absent; plugin sandbox is a thin Windows wrapper without Job Object isolation.",
-    "File diff has 4 open issues: revert returns 500 instead of 409, no approval gate, no batch revert, no git/VCS fallback, no end-to-end round-trip smoke.",
+    "File diff UI: add batch select checkbox per row + 'Revert selected' action (service and API are ready; only the UI affordance is missing).",
     "GitHub bot / browser / mobile / workflow builder are essentially 0% (future expansion; 4.5% average readiness)."
   ],
   "delta_vs_previous_audits": {

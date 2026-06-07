@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { AlertTriangle, FileClock, Loader2, RotateCcw, ShieldOff, Sparkles } from "lucide-react";
+import { AlertTriangle, FileClock, Loader2, RotateCcw, ShieldOff, Sparkles, Hourglass, ShieldCheck } from "lucide-react";
 import { FileChange, api } from "../api/client";
 
 type FileChangesPanelProps = {
@@ -9,12 +9,25 @@ type FileChangesPanelProps = {
   onRefresh: () => void;
 };
 
+type RevertErrorState = {
+  kind: "conflict" | "forbidden" | "error";
+  message: string;
+  changeId: string;
+};
+
+type WaitingPermissionState = {
+  changeId: string;
+  permissionRequestId: string;
+  approvalNonce?: string;
+};
+
 export function FileChangesPanel({ fileChanges, loading, error, onRefresh }: FileChangesPanelProps) {
   const [selectedId, setSelectedId] = useState<string | undefined>();
   const [detail, setDetail] = useState<FileChange | undefined>();
   const [detailError, setDetailError] = useState<string | undefined>();
   const [busy, setBusy] = useState<Record<string, "revert">>({});
-  const [revertError, setRevertError] = useState<string | undefined>();
+  const [revertError, setRevertError] = useState<RevertErrorState | undefined>();
+  const [waitingPermission, setWaitingPermission] = useState<WaitingPermissionState | undefined>();
 
   const ordered = useMemo(
     () => [...fileChanges].sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? "")),
@@ -33,22 +46,55 @@ export function FileChangesPanel({ fileChanges, loading, error, onRefresh }: Fil
     }
   };
 
-  const revertChange = async (id: string, force: boolean) => {
+  const classifyRevertError = (raw: string, changeId: string): RevertErrorState => {
+    const lower = raw.toLowerCase();
+    if (lower.includes("hash_mismatch") || lower.includes("already_reverted") || lower.includes("not_revertible")) {
+      return { kind: "conflict", message: raw, changeId };
+    }
+    if (lower.includes("forbidden") || lower.includes("secret")) {
+      return { kind: "forbidden", message: raw, changeId };
+    }
+    return { kind: "error", message: raw, changeId };
+  };
+
+  const revertChange = async (id: string, force: boolean, permissionRequestId?: string) => {
     setBusy((current) => ({ ...current, [id]: "revert" }));
     setRevertError(undefined);
+    setWaitingPermission(undefined);
     try {
-      const { file_change } = await api.revertFileChange(id, force);
+      const { file_change } = await api.revertFileChange(id, force, permissionRequestId);
       if (selectedId === id) {
         setDetail(file_change);
       }
       onRefresh();
     } catch (err) {
-      setRevertError(err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes("permission_request_id")) {
+        const match = message.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/);
+        if (match) {
+          setWaitingPermission({ changeId: id, permissionRequestId: match[0] });
+          return;
+        }
+      }
+      setRevertError(classifyRevertError(message, id));
     } finally {
       setBusy((current) => {
         const next = { ...current };
         delete next[id];
         return next;
+      });
+    }
+  };
+
+  const approveAndRetry = async (state: WaitingPermissionState) => {
+    try {
+      await api.approvePermission(state.permissionRequestId, "ui_approval");
+      await revertChange(state.changeId, false, state.permissionRequestId);
+    } catch (err) {
+      setRevertError({
+        kind: "error",
+        message: err instanceof Error ? err.message : String(err),
+        changeId: state.changeId,
       });
     }
   };
@@ -88,7 +134,29 @@ export function FileChangesPanel({ fileChanges, loading, error, onRefresh }: Fil
         </h3>
         <span className="muted">{ordered.length} change(s)</span>
       </div>
-      {revertError ? <div className="banner error">{revertError}</div> : null}
+      {revertError ? (
+        <div className={`banner ${revertError.kind === "conflict" ? "warn" : "error"}`}>
+          {revertError.kind === "conflict" ? <AlertTriangle size={14} /> : <ShieldOff size={14} />}
+          <span>{revertError.message}</span>
+        </div>
+      ) : null}
+      {waitingPermission ? (
+        <div className="banner info">
+          <Hourglass size={14} />
+          <span>
+            Revert is waiting for approval (permission_request_id=
+            <code>{waitingPermission.permissionRequestId}</code>).
+          </span>
+          <button
+            type="button"
+            className="primary"
+            onClick={() => approveAndRetry(waitingPermission)}
+            disabled={Boolean(busy[waitingPermission.changeId])}
+          >
+            <ShieldCheck size={14} /> Approve and retry
+          </button>
+        </div>
+      ) : null}
       <div className="file-changes-grid">
         <ul className="file-changes-list">
           {ordered.map((change) => {

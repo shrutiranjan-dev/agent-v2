@@ -468,9 +468,16 @@ Optional Windows smokes (skip cleanly when prerequisites are missing):
 - `permission-resume-smoke.ps1` (SKIP unless `AP_ENABLE_TEST_ENDPOINTS=true`,
   an Ollama model is available, and active worker heartbeats exist; the
   full e2e flow needs Bash)
-- `file-change-smoke.ps1` (validates `/file-changes` route registration, the
-  200/404 round-trip, and prints `FILE_CHANGES=endpoint_validated`; SKIP if
-  the backend is not up; full end-to-end revert round-trip is Batch 2 work)
+- `file-change-smoke.ps1` / `file-change-smoke.sh` (File Diff Batch 2):
+  when `AP_ENABLE_TEST_ENDPOINTS=true` and the backend is up, performs a real
+  `POST /test-endpoints/file-change-write` → `GET /file-changes` →
+  `POST /file-changes/{id}/revert` → SHA-256 verify round-trip, asserts the
+  on-disk content is restored byte-for-byte, and prints
+  `FILE_CHANGES=round_trip_validated`. When `AP_ENABLE_TEST_ENDPOINTS=false`
+  it prints `FILE_CHANGES=skipped_test_endpoint_disabled` and exits 0 (clean
+  skip). Without a live backend it prints `FILE_CHANGES=endpoint_validated`
+  after checking OpenAPI route registration and 200/404 round-trips. SKIP if
+  the backend is not reachable.
 
 Why some smokes skip without `AP_ENABLE_TEST_ENDPOINTS=true`:
 

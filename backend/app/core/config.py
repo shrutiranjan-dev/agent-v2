@@ -250,6 +250,8 @@ class FileChangeConfig(BaseModel):
     capture_diff: bool = True
     max_content_bytes: int = Field(default=512_000, ge=1024)
     max_diff_bytes: int = Field(default=256_000, ge=1024)
+    revert_requires_approval: bool = True
+    git_fallback_enabled: bool = True
     secret_filename_globs: list[str] = Field(
         default_factory=lambda: [
             ".env",
@@ -683,6 +685,20 @@ class Settings(BaseSettings):
     bootstrap_user_email_override: str | None = Field(
         default=None, validation_alias=AliasChoices("AP_BOOTSTRAP_USER_EMAIL", "BOOTSTRAP_USER_EMAIL")
     )
+    file_changes_revert_requires_approval_override: bool | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "AP_FILE_CHANGE_REVERT_REQUIRES_APPROVAL",
+            "FILE_CHANGE_REVERT_REQUIRES_APPROVAL",
+        ),
+    )
+    file_changes_git_fallback_enabled_override: bool | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "AP_FILE_CHANGE_GIT_FALLBACK_ENABLED",
+            "FILE_CHANGE_GIT_FALLBACK_ENABLED",
+        ),
+    )
 
     @field_validator("cors_origins_override", mode="before")
     @classmethod
@@ -935,6 +951,10 @@ class Settings(BaseSettings):
             self.bootstrap.workspace_name = self.bootstrap_workspace_name_override
         if self.bootstrap_user_email_override:
             self.bootstrap.user_email = self.bootstrap_user_email_override
+        if self.file_changes_revert_requires_approval_override is not None:
+            self.file_changes.revert_requires_approval = self.file_changes_revert_requires_approval_override
+        if self.file_changes_git_fallback_enabled_override is not None:
+            self.file_changes.git_fallback_enabled = self.file_changes_git_fallback_enabled_override
         self._validate_production()
         return self
 

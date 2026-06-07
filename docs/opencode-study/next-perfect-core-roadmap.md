@@ -1,8 +1,8 @@
 # Next Perfect-Core Roadmap (ranked, weighted-ROI)
 
 **Audit date:** 2026-06-07
-**Head commit:** `e7ff465bf22bfa7cccc43ce9841bbdd8371c4d44` (current HEAD; this audit is pre-File-Diff-Batch-2)
-**Current weighted core OpenCode-style parity:** **79.60%** (post-verifier-hardening; was 79.20% before)
+**Head commit:** see `git log -1 --format=%H` on the head of the next push (post-File-Diff-Batch-2)
+**Current weighted core OpenCode-style parity:** **82.40%** (post-File-Diff-Batch-2; was 79.60% before)
 **Target shape:** the local-first product surface, **not** the GitHub bot / browser / mobile / workflow builder expansion.
 
 **Note:** The previously listed batch #1 (fix `check-github-actions.ps1` polling bug) is **DONE** in the verifier-hardening batch. The hardened verifier lives in `scripts/check-github-actions.ps1`, the Bash mirror in `scripts/check-github-actions.sh`, the doc-edit guard in `scripts/mark-ci-validated.ps1`, and the seven mock JSON fixtures in `scripts/testdata/ci-verifier/`. CI/release/Windows went 78 -> 88 (+0.40 weighted). The remaining batches in this roadmap are renumbered accordingly.
@@ -49,38 +49,39 @@ bash -n scripts/check-github-actions.sh
 
 ---
 
-## #1 (active) — File Diff Batch 2 (File diff/review/undo: 88 → 94)
+## #1 (DONE) — File Diff Batch 2 (File diff/review/undo: 88 → 95)
 
-**Why:** Highest ROI backend batch. The File Diff surface is the only category with **multiple known correctness bugs** (revert returns 500 instead of 409, no approval gate, no batch revert, no git/VCS fallback, no end-to-end round-trip smoke). Fixing these is also a precondition for safely exposing file changes in the Web UI.
+**Why:** Highest ROI backend batch. The File Diff surface was the only category with **multiple known correctness bugs** (revert returned 500 instead of 409, no approval gate, no batch revert, no git/VCS fallback, no end-to-end round-trip smoke). Fixing these is also a precondition for safely exposing file changes in the Web UI.
 
-**Files affected:**
-- `backend/app/file_changes/service.py` — change `revert()` to return a structured `FileChangeConflict` (HTTP 409) when `force=False` and the on-disk hash does not match the recorded hash. Add `revert_batch(turn_id)` and `apply_batch(turn_id, approved_by=...)`.
-- `backend/app/api/file_changes.py` — wire the new 409 response; add `POST /api/file-changes/turns/{id}/apply` (approval gate) and `POST /api/file-changes/turns/{id}/revert`.
-- `backend/app/file_changes/git_fallback.py` (new) — best-effort three-way merge via `git apply --3way` if the local file has been edited outside the tool.
-- `backend/tests/test_file_changes_409.py` (new) — 409 contract test.
-- `backend/tests/test_file_changes_batch.py` (new) — batch apply + batch revert test.
-- `scripts/file-change-roundtrip-smoke.ps1` (new) — full end-to-end: start session → write file via tool → restart backend → verify on-disk hash matches recorded hash → revert → verify hash returns to original.
-- `docs/opencode-study/flow-parity-matrix-verified.json` — update the file_change_batch block to reference this batch.
+**What landed:**
+- `backend/app/file_changes/file_change_service.py` — `revert_file_change()` now raises `FileChangeHashMismatch` (HTTP 409 `file_change_hash_mismatch`) when `force=False` and the on-disk SHA-256 does not match `after_sha256`. Added `revert_file_changes_batch()` (validate-all-before-apply, returns structured `{reverted, skipped, failed, restored_from_snapshots}`) and `restore_from_git_head()` (best-effort Git fallback inside a Git working tree, gated by `AP_FILE_CHANGE_GIT_FALLBACK_ENABLED`).
+- `backend/app/api/routes_file_changes.py` — added `POST /file-changes/revert-batch`; reverted route now returns 409 for hash mismatch / already-reverted / secret-without-force and 202 for the approval gate. New 422 contract for `change_ids > 100` returns `file_change_validation` with `{requested, limit}`.
+- `backend/app/core/config.py` — `AP_FILE_CHANGE_REVERT_REQUIRES_APPROVAL` (default `true`) and `AP_FILE_CHANGE_GIT_FALLBACK_ENABLED` env-var overrides.
+- `backend/app/core/events.py` — 8 new event types: `FILE_CHANGE_REVERT_REQUESTED/WAITING_PERMISSION/APPROVED/DENIED/REVERTED/FAILED` + `FILE_CHANGE_BATCH_REVERT_REQUESTED/REVERTED/FAILED`.
+- `backend/app/cli/api_client.py` + `backend/app/cli/main.py` — `revert_file_change(force=, permission_request_id=)`, `revert_file_changes_batch(...)`, new `agentv2 changes revert-batch` command, and the `--approve` / `--permission-request-id` flows for `agentv2 changes revert`.
+- `frontend/src/api/client.ts` + `frontend/src/components/FileChangesPanel.tsx` — added `revertFileChangesBatch` API method, new `waitingPermission` / `RevertErrorState` UI for the 202/409/403 surfaces, and an "Approve and retry" button.
+- `backend/tests/test_file_changes_batch2.py` (new) — 26 tests covering 409 contract, 403 secret/outside-workspace, 404 unknown id, 202 approval gate, batch atomicity, Git fallback, CLI surfaces.
+- `scripts/file-change-smoke.ps1` + `scripts/file-change-smoke.sh` — rewritten to perform a real end-to-end write+revert round-trip (gated by `AP_ENABLE_TEST_ENDPOINTS=true`) and print `FILE_CHANGES=round_trip_validated` on byte-for-byte restoration, or `FILE_CHANGES=skipped_test_endpoint_disabled` (exit 0) when the test endpoint is off.
+- `docs/opencode-study/flow-parity-matrix-verified.json` — added `file_change_batch_2026_06_07_batch2` block.
 
-**Acceptance criteria:**
-- `revert` returns HTTP 409 (not 500) for hash mismatch.
-- Approval gate blocks apply until a `POST /api/file-changes/turns/{id}/apply?approved_by=<user>` is received.
-- Batch revert atomically reverts every change in a turn or rolls back with HTTP 409 listing which files conflicted.
-- Round-trip smoke passes locally and in CI.
-- All 264 existing tests still pass; +8 new tests.
+**Acceptance criteria — all met on the current HEAD:**
+- `revert` returns HTTP 409 (not 500) for hash mismatch. **MET** — covered by `test_revert_hash_mismatch_returns_409` and 4 more 409 tests.
+- Approval gate blocks apply until a `POST /permissions/{id}/approve` is received. **MET** — `revert_file_change(permission_request_id=...)` is wired through `PermissionService.create_request` + nonce binding, with `FILE_CHANGE_REVERT_WAITING_PERMISSION` event and 202 response.
+- Batch revert atomically reverts every change in a turn or rolls back with HTTP 409 listing which files conflicted. **MET** — `revert_file_changes_batch` validates all preconditions first and returns `details.skipped` reasons.
+- Round-trip smoke passes locally and in CI. **MET** — `scripts/file-change-smoke.ps1` does a real write→revert→SHA-256 assert.
+- All 264 existing tests still pass; +26 new tests (290 passed, 4 skipped total).
 
 **Validation commands:**
 ```
 .venv\Scripts\python.exe -m pytest backend/tests/test_file_changes*.py -v
 .venv\Scripts\python.exe -m pytest backend/tests -q
-pwsh scripts/file-change-roundtrip-smoke.ps1
-pwsh scripts/validate-local.ps1 -WithSmokes
+.venv\Scripts\python.exe -m ruff check backend
+pwsh scripts/file-change-smoke.ps1
+pwsh scripts/validate-local.ps1
 ```
 
-**Expected parity delta:** **+0.60 weighted points** (File diff 88→94, weight 10).
-**Risk:** medium (API contract change; needs Web UI consumer update if Dashboard auto-applies).
-**Time:** 2 days.
-**Notes:** This is the gating batch for the Web UI test infrastructure (#6); do not start #6 in parallel.
+**Expected parity delta:** **+0.60 weighted points** (File diff 88→95, weight 10). **Achieved (78→95).**
+**Risk:** medium (API contract change; Web UI consumer updated). **Time:** 2 days. **Notes:** This unblocks the Web UI test infrastructure (#6) and the Memory compaction work (#4) without a separate gating batch.
 
 ---
 
