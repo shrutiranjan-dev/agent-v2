@@ -15,6 +15,12 @@ from typing import Any
 from urllib.parse import unquote, urlparse
 
 from backend.app.codeintel.language import detect_language, lsp_language_id
+from backend.app.codeintel.lsp_registry import (
+    all_server_ids,
+    get_preset,
+    get_preset_for_language,
+    get_server_attribute,
+)
 from backend.app.core.config import get_settings
 from backend.app.core.redaction import redact_text
 from backend.app.tools.base import is_inside
@@ -79,15 +85,10 @@ class LspClient:
         return self._language
 
     def _get_settings_attr(self, attr: str) -> Any:
-        settings = get_settings()
-        if self._language == "python":
-            mapped = "python_command" if attr == "command" else attr
-            return getattr(settings.lsp, mapped)
-        elif self._language in ("typescript", "typescriptreact", "javascript", "javascriptreact"):
-            ts_attr = f"ts_{attr}"
-            if hasattr(settings.lsp, ts_attr):
-                return getattr(settings.lsp, ts_attr)
-        return getattr(settings.lsp, attr)
+        preset = get_preset_for_language(self._language)
+        if preset is not None:
+            return get_server_attribute(get_settings().lsp, preset.server_id, attr)
+        return get_server_attribute(get_settings().lsp, self._language, attr)
 
     async def health(self, workspace_root: Path) -> dict[str, Any]:
         try:
@@ -393,24 +394,13 @@ class LspClient:
             self._opened_documents.add(uri)
 
     def _validate_workspace_root(self, workspace_root: Path) -> None:
-        if self._language in ("typescript", "typescriptreact", "javascript", "javascriptreact"):
-            ts_root = get_settings().lsp.ts_workspace_root
-            if ts_root:
-                configured_root = ts_root.resolve()
-            else:
-                configured_root = get_settings().lsp.workspace_root.resolve()
-        else:
-            configured_root = get_settings().lsp.workspace_root.resolve()
+        configured_root = self._get_workspace_root().resolve()
         resolved = workspace_root.resolve()
         if resolved != configured_root and not is_inside(configured_root, resolved):
             raise PermissionError(f"LSP workspace root is outside configured root: {resolved}")
 
     def _validate_document_path(self, path: Path) -> Path:
-        if self._language in ("typescript", "typescriptreact", "javascript", "javascriptreact"):
-            ts_root = get_settings().lsp.ts_workspace_root
-            default_root = ts_root if ts_root else get_settings().lsp.workspace_root
-        else:
-            default_root = get_settings().lsp.workspace_root
+        default_root = self._get_workspace_root()
         workspace_root = (self._workspace_root or default_root).resolve()
         resolved = path.resolve() if path.is_absolute() else (workspace_root / path).resolve()
         if not is_inside(workspace_root, resolved):
@@ -462,7 +452,8 @@ class LspClient:
             value = os.environ.get(key)
             if value:
                 env[key] = value
-        if self._language in ("typescript", "typescriptreact", "javascript", "javascriptreact"):
+        preset = get_preset_for_language(self._language)
+        if preset is not None and preset.requires_node:
             node_path = shutil.which("node")
             npm_path = shutil.which("npm") or shutil.which("npm.cmd")
             npx_path = shutil.which("npx") or shutil.which("npx.cmd")
@@ -493,20 +484,25 @@ class LspClient:
         return self._stderr_text or None
 
     def debug_snapshot(self, *, error: Exception | None = None) -> dict[str, Any]:
-        if self._language == "python":
-            spec = importlib.util.find_spec("pylsp")
-            lang_import_check = {
-                "available": spec is not None,
-                "origin": getattr(spec, "origin", None),
-            }
-        else:
-            tsls_spec = importlib.util.find_spec("typescript_language_server")
-            lang_import_check = {
-                "available": tsls_spec is not None,
-                "origin": getattr(tsls_spec, "origin", None),
-            }
+        preset = get_preset_for_language(self._language)
+        import_module = None
+        if preset is not None:
+            first_part = parse_lsp_command(preset.default_command)[0] if preset.default_command else ""
+            first_base = Path(first_part).name
+            if first_base and "." not in first_base:
+                import_module = first_base.replace("-", "_")
+        spec = importlib.util.find_spec(import_module) if import_module else None
+        lang_import_check = {
+            "module": import_module,
+            "available": spec is not None,
+            "origin": getattr(spec, "origin", None) if spec else None,
+        }
         snapshot = {
             "language": self._language,
+            "server_id": preset.server_id if preset else None,
+            "display_name": preset.display_name if preset else None,
+            "install_hint_windows": preset.install_hint_windows if preset else None,
+            "install_hint_linux_ci": preset.install_hint_linux_ci if preset else None,
             "configured_command": self._configured_command or self._get_settings_attr("command"),
             "spawn_argv": list(self._spawn_argv),
             "command": self._command or self._get_settings_attr("command"),
@@ -524,7 +520,7 @@ class LspClient:
             "sys_executable": sys.executable,
             "platform": platform.platform(),
             "language_server_import_check": lang_import_check,
-            "node_check": self._node_check() if self._language in ("typescript", "typescriptreact", "javascript", "javascriptreact") else None,
+            "node_check": self._node_check() if (preset is not None and preset.requires_node) else None,
             "stderr_tail": self.last_error_details(),
             "running": self._is_running(),
         }
@@ -537,10 +533,9 @@ class LspClient:
         return snapshot
 
     def _get_workspace_root(self) -> Path:
-        if self._language in ("typescript", "typescriptreact", "javascript", "javascriptreact"):
-            ts_root = get_settings().lsp.ts_workspace_root
-            if ts_root:
-                return ts_root
+        ws_attr = self._get_settings_attr("workspace_root")
+        if ws_attr:
+            return ws_attr
         return get_settings().lsp.workspace_root
 
     def _node_check(self) -> dict[str, Any] | None:
@@ -593,35 +588,60 @@ class LspClient:
 
 class MultiLanguageLspClient:
     def __init__(self) -> None:
-        self._clients: dict[str, LspClient] = {
-            "python": LspClient("python"),
-            "typescript": LspClient("typescript"),
-            "typescriptreact": LspClient("typescriptreact"),
-            "javascript": LspClient("javascript"),
-            "javascriptreact": LspClient("javascriptreact"),
-        }
+        self._clients: dict[str, LspClient] = {}
+        for server_id in all_server_ids():
+            preset = get_preset(server_id)
+            if preset is None:
+                continue
+            for language in preset.languages:
+                if language not in self._clients:
+                    self._clients[language] = LspClient(language)
 
-    def get_client(self, language: str) -> LspClient:
-        return self._clients.get(language, self._clients["python"])
+    def get_client(self, language: str) -> LspClient | None:
+        return self._clients.get(language)
+
+    def languages(self) -> list[str]:
+        return list(self._clients.keys())
 
     async def health(self, workspace_root: Path) -> dict[str, Any]:
-        return {
-            "python": await self._clients["python"].health(workspace_root),
-            "typescript": await self._clients["typescript"].health(workspace_root),
-        }
+        snapshot: dict[str, Any] = {}
+        for server_id in all_server_ids():
+            preset = get_preset(server_id)
+            if preset is None:
+                continue
+            client = self._clients.get(preset.languages[0])
+            if client is None:
+                continue
+            snapshot[server_id] = await client.health(workspace_root)
+        return snapshot
 
     async def shutdown_all(self) -> dict[str, Any]:
         results = {}
-        for lang, client in self._clients.items():
+        for server_id in all_server_ids():
+            preset = get_preset(server_id)
+            if preset is None:
+                continue
+            client = self._clients.get(preset.languages[0])
+            if client is None:
+                continue
             try:
-                results[lang] = await client.shutdown()
+                results[server_id] = await client.shutdown()
             except Exception as exc:
-                results[lang] = {"error": str(exc)}
+                results[server_id] = {"error": str(exc)}
         return results
 
     def debug_snapshot_all(self) -> dict[str, Any]:
-        return {lang: client.debug_snapshot() for lang, client in self._clients.items()}
+        snapshot: dict[str, Any] = {}
+        for server_id in all_server_ids():
+            preset = get_preset(server_id)
+            if preset is None:
+                continue
+            client = self._clients.get(preset.languages[0])
+            if client is None:
+                continue
+            snapshot[server_id] = client.debug_snapshot()
+        return snapshot
 
 
 multi_lsp_client = MultiLanguageLspClient()
-lsp_client = multi_lsp_client._clients["python"]
+lsp_client = multi_lsp_client._clients.get("python") or LspClient("python")

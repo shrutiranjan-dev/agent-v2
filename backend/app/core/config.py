@@ -1,6 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import AliasChoices, BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -79,6 +79,95 @@ class LspConfig(BaseModel):
     ts_shutdown_timeout_seconds: int = Field(default=5, ge=1)
     ts_max_response_chars: int = Field(default=200_000, ge=1000)
     ts_workspace_root: Path | None = None
+    go_enabled: bool = False
+    go_command: str = "gopls"
+    go_startup_timeout_seconds: int = Field(default=10, ge=1)
+    go_request_timeout_seconds: int = Field(default=10, ge=1)
+    go_shutdown_timeout_seconds: int = Field(default=5, ge=1)
+    go_max_response_chars: int = Field(default=200_000, ge=1000)
+    go_workspace_root: Path | None = None
+    rust_enabled: bool = False
+    rust_command: str = "rust-analyzer"
+    rust_startup_timeout_seconds: int = Field(default=10, ge=1)
+    rust_request_timeout_seconds: int = Field(default=10, ge=1)
+    rust_shutdown_timeout_seconds: int = Field(default=5, ge=1)
+    rust_max_response_chars: int = Field(default=200_000, ge=1000)
+    rust_workspace_root: Path | None = None
+    java_enabled: bool = False
+    java_command: str = "jdtls"
+    java_startup_timeout_seconds: int = Field(default=10, ge=1)
+    java_request_timeout_seconds: int = Field(default=10, ge=1)
+    java_shutdown_timeout_seconds: int = Field(default=5, ge=1)
+    java_max_response_chars: int = Field(default=200_000, ge=1000)
+    java_workspace_root: Path | None = None
+    ruby_enabled: bool = False
+    ruby_command: str = "ruby-lsp"
+    ruby_startup_timeout_seconds: int = Field(default=10, ge=1)
+    ruby_request_timeout_seconds: int = Field(default=10, ge=1)
+    ruby_shutdown_timeout_seconds: int = Field(default=5, ge=1)
+    ruby_max_response_chars: int = Field(default=200_000, ge=1000)
+    ruby_workspace_root: Path | None = None
+    php_enabled: bool = False
+    php_command: str = "intelephense --stdio"
+    php_startup_timeout_seconds: int = Field(default=10, ge=1)
+    php_request_timeout_seconds: int = Field(default=10, ge=1)
+    php_shutdown_timeout_seconds: int = Field(default=5, ge=1)
+    php_max_response_chars: int = Field(default=200_000, ge=1000)
+    php_workspace_root: Path | None = None
+    csharp_enabled: bool = False
+    csharp_command: str = "csharp-ls"
+    csharp_startup_timeout_seconds: int = Field(default=10, ge=1)
+    csharp_request_timeout_seconds: int = Field(default=10, ge=1)
+    csharp_shutdown_timeout_seconds: int = Field(default=5, ge=1)
+    csharp_max_response_chars: int = Field(default=200_000, ge=1000)
+    csharp_workspace_root: Path | None = None
+    kotlin_enabled: bool = False
+    kotlin_command: str = "kotlin-language-server"
+    kotlin_startup_timeout_seconds: int = Field(default=10, ge=1)
+    kotlin_request_timeout_seconds: int = Field(default=10, ge=1)
+    kotlin_shutdown_timeout_seconds: int = Field(default=5, ge=1)
+    kotlin_max_response_chars: int = Field(default=200_000, ge=1000)
+    kotlin_workspace_root: Path | None = None
+    lua_enabled: bool = False
+    lua_command: str = "lua-language-server"
+    lua_startup_timeout_seconds: int = Field(default=10, ge=1)
+    lua_request_timeout_seconds: int = Field(default=10, ge=1)
+    lua_shutdown_timeout_seconds: int = Field(default=5, ge=1)
+    lua_max_response_chars: int = Field(default=200_000, ge=1000)
+    lua_workspace_root: Path | None = None
+    clangd_enabled: bool = False
+    clangd_command: str = "clangd"
+    clangd_startup_timeout_seconds: int = Field(default=10, ge=1)
+    clangd_request_timeout_seconds: int = Field(default=10, ge=1)
+    clangd_shutdown_timeout_seconds: int = Field(default=5, ge=1)
+    clangd_max_response_chars: int = Field(default=200_000, ge=1000)
+    clangd_workspace_root: Path | None = None
+
+    def get_for_language(self, language: str, attr: str) -> Any:
+        if language in ("python",):
+            mapped = "python_command" if attr == "command" else attr
+            return getattr(self, mapped)
+        if language in ("typescript", "typescriptreact", "javascript", "javascriptreact"):
+            ts_attr = f"ts_{attr}"
+            if hasattr(self, ts_attr):
+                return getattr(self, ts_attr)
+        lang_attr = f"{language}_{attr}"
+        if hasattr(self, lang_attr):
+            return getattr(self, lang_attr)
+        return getattr(self, attr, None)
+
+    def get_for_server(self, server_id: str, attr: str) -> Any:
+        if server_id == "python":
+            mapped = "python_command" if attr == "command" else attr
+            return getattr(self, mapped)
+        if server_id in ("typescript", "typescriptreact", "javascript", "javascriptreact"):
+            ts_attr = f"ts_{attr}"
+            if hasattr(self, ts_attr):
+                return getattr(self, ts_attr)
+        lang_attr = f"{server_id}_{attr}"
+        if hasattr(self, lang_attr):
+            return getattr(self, lang_attr)
+        return getattr(self, attr, None)
 
 
 class McpConfig(BaseModel):
@@ -319,6 +408,114 @@ class Settings(BaseSettings):
     lsp_ts_workspace_root_override: Path | None = Field(
         default=None,
         validation_alias=AliasChoices("AP_TS_LSP_WORKSPACE_ROOT", "TS_LSP_WORKSPACE_ROOT"),
+    )
+    lsp_go_enabled_override: bool | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AP_GO_LSP_ENABLED"),
+    )
+    lsp_go_command_override: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AP_GO_LSP_COMMAND"),
+    )
+    lsp_go_workspace_root_override: Path | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AP_GO_LSP_WORKSPACE_ROOT"),
+    )
+    lsp_rust_enabled_override: bool | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AP_RUST_LSP_ENABLED"),
+    )
+    lsp_rust_command_override: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AP_RUST_LSP_COMMAND"),
+    )
+    lsp_rust_workspace_root_override: Path | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AP_RUST_LSP_WORKSPACE_ROOT"),
+    )
+    lsp_java_enabled_override: bool | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AP_JAVA_LSP_ENABLED"),
+    )
+    lsp_java_command_override: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AP_JAVA_LSP_COMMAND"),
+    )
+    lsp_java_workspace_root_override: Path | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AP_JAVA_LSP_WORKSPACE_ROOT"),
+    )
+    lsp_ruby_enabled_override: bool | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AP_RUBY_LSP_ENABLED"),
+    )
+    lsp_ruby_command_override: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AP_RUBY_LSP_COMMAND"),
+    )
+    lsp_ruby_workspace_root_override: Path | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AP_RUBY_LSP_WORKSPACE_ROOT"),
+    )
+    lsp_php_enabled_override: bool | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AP_PHP_LSP_ENABLED"),
+    )
+    lsp_php_command_override: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AP_PHP_LSP_COMMAND"),
+    )
+    lsp_php_workspace_root_override: Path | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AP_PHP_LSP_WORKSPACE_ROOT"),
+    )
+    lsp_csharp_enabled_override: bool | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AP_CSHARP_LSP_ENABLED"),
+    )
+    lsp_csharp_command_override: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AP_CSHARP_LSP_COMMAND"),
+    )
+    lsp_csharp_workspace_root_override: Path | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AP_CSHARP_LSP_WORKSPACE_ROOT"),
+    )
+    lsp_kotlin_enabled_override: bool | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AP_KOTLIN_LSP_ENABLED"),
+    )
+    lsp_kotlin_command_override: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AP_KOTLIN_LSP_COMMAND"),
+    )
+    lsp_kotlin_workspace_root_override: Path | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AP_KOTLIN_LSP_WORKSPACE_ROOT"),
+    )
+    lsp_lua_enabled_override: bool | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AP_LUA_LSP_ENABLED"),
+    )
+    lsp_lua_command_override: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AP_LUA_LSP_COMMAND"),
+    )
+    lsp_lua_workspace_root_override: Path | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AP_LUA_LSP_WORKSPACE_ROOT"),
+    )
+    lsp_clangd_enabled_override: bool | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AP_CLANGD_LSP_ENABLED"),
+    )
+    lsp_clangd_command_override: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AP_CLANGD_LSP_COMMAND"),
+    )
+    lsp_clangd_workspace_root_override: Path | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AP_CLANGD_LSP_WORKSPACE_ROOT"),
     )
     codeintel_max_file_bytes_override: int | None = Field(
         default=None, validation_alias=AliasChoices("AP_CODEINTEL_MAX_FILE_BYTES", "CODEINTEL_MAX_FILE_BYTES")
@@ -567,6 +764,60 @@ class Settings(BaseSettings):
             self.lsp.ts_max_response_chars = self.lsp_ts_max_response_chars_override
         if self.lsp_ts_workspace_root_override is not None:
             self.lsp.ts_workspace_root = self.lsp_ts_workspace_root_override
+        if self.lsp_go_enabled_override is not None:
+            self.lsp.go_enabled = self.lsp_go_enabled_override
+        if self.lsp_go_command_override:
+            self.lsp.go_command = self.lsp_go_command_override
+        if self.lsp_go_workspace_root_override is not None:
+            self.lsp.go_workspace_root = self.lsp_go_workspace_root_override
+        if self.lsp_rust_enabled_override is not None:
+            self.lsp.rust_enabled = self.lsp_rust_enabled_override
+        if self.lsp_rust_command_override:
+            self.lsp.rust_command = self.lsp_rust_command_override
+        if self.lsp_rust_workspace_root_override is not None:
+            self.lsp.rust_workspace_root = self.lsp_rust_workspace_root_override
+        if self.lsp_java_enabled_override is not None:
+            self.lsp.java_enabled = self.lsp_java_enabled_override
+        if self.lsp_java_command_override:
+            self.lsp.java_command = self.lsp_java_command_override
+        if self.lsp_java_workspace_root_override is not None:
+            self.lsp.java_workspace_root = self.lsp_java_workspace_root_override
+        if self.lsp_ruby_enabled_override is not None:
+            self.lsp.ruby_enabled = self.lsp_ruby_enabled_override
+        if self.lsp_ruby_command_override:
+            self.lsp.ruby_command = self.lsp_ruby_command_override
+        if self.lsp_ruby_workspace_root_override is not None:
+            self.lsp.ruby_workspace_root = self.lsp_ruby_workspace_root_override
+        if self.lsp_php_enabled_override is not None:
+            self.lsp.php_enabled = self.lsp_php_enabled_override
+        if self.lsp_php_command_override:
+            self.lsp.php_command = self.lsp_php_command_override
+        if self.lsp_php_workspace_root_override is not None:
+            self.lsp.php_workspace_root = self.lsp_php_workspace_root_override
+        if self.lsp_csharp_enabled_override is not None:
+            self.lsp.csharp_enabled = self.lsp_csharp_enabled_override
+        if self.lsp_csharp_command_override:
+            self.lsp.csharp_command = self.lsp_csharp_command_override
+        if self.lsp_csharp_workspace_root_override is not None:
+            self.lsp.csharp_workspace_root = self.lsp_csharp_workspace_root_override
+        if self.lsp_kotlin_enabled_override is not None:
+            self.lsp.kotlin_enabled = self.lsp_kotlin_enabled_override
+        if self.lsp_kotlin_command_override:
+            self.lsp.kotlin_command = self.lsp_kotlin_command_override
+        if self.lsp_kotlin_workspace_root_override is not None:
+            self.lsp.kotlin_workspace_root = self.lsp_kotlin_workspace_root_override
+        if self.lsp_lua_enabled_override is not None:
+            self.lsp.lua_enabled = self.lsp_lua_enabled_override
+        if self.lsp_lua_command_override:
+            self.lsp.lua_command = self.lsp_lua_command_override
+        if self.lsp_lua_workspace_root_override is not None:
+            self.lsp.lua_workspace_root = self.lsp_lua_workspace_root_override
+        if self.lsp_clangd_enabled_override is not None:
+            self.lsp.clangd_enabled = self.lsp_clangd_enabled_override
+        if self.lsp_clangd_command_override:
+            self.lsp.clangd_command = self.lsp_clangd_command_override
+        if self.lsp_clangd_workspace_root_override is not None:
+            self.lsp.clangd_workspace_root = self.lsp_clangd_workspace_root_override
         if self.codeintel_max_file_bytes_override is not None:
             self.codeintel.max_file_bytes = self.codeintel_max_file_bytes_override
         if self.codeintel_max_files_override is not None:

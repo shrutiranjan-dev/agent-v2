@@ -1455,3 +1455,36 @@ Final validation: `.venv\Scripts\pytest backend\tests` passes with **223 passed,
 3. `textDocument/hover`, `textDocument/completion`, and `workspace/symbol` coverage.
 4. Multi-document workspace diagnostics and incremental sync.
 
+# Multi-Language LSP Manager Batch 1 Implementation Result
+
+Date: 2026-06-07
+
+## Multi-LSP status
+
+- `MULTI_LSP_REGISTRY_IMPLEMENTED_FAKE_TESTED`: a new `LspServerPreset` registry (`backend/app/codeintel/lsp_registry.py`) declares 14 language servers (Python, TypeScript, TypeScript+React, JavaScript, JavaScript+React, Go, Rust, Java, Ruby, PHP, C#, Kotlin, Lua, clangd for C/C++). Each preset carries `server_id`, `file_extensions`, `language_ids`, `default_command`, Windows + Linux install hints, and a `requires_node` flag.
+- `LspClient` and `LspService` are now registry-driven: routing goes from `detect_language(file_path)` → `LspServerPreset` → `server_id` → per-server settings (`{server_id}_enabled`, `{server_id}_command`, `{server_id}_workspace_root`). Python keeps its `python_command` alias; TS/JS sub-languages share the `ts_*` prefix; other languages use `{server_id}_*`.
+- All non-Python, non-TS presets are disabled by default (`AP_<SERVER>_LSP_ENABLED=false`). When the preset is disabled, `LspService` returns `source=static_fallback`, `lsp_server=none`, and `fallback_reason=<server_id>_lsp_disabled`. When the preset is enabled but the command is missing, it returns `fallback_reason=<server_id>_lsp_command_missing`. The static database index fallback is never bypassed.
+- `/health/codeintel` now exposes a `lsp_servers` dictionary that lists every preset (python, typescript, typescriptreact, javascript, javascriptreact, go, rust, java, ruby, php, csharp, kotlin, lua, clangd) with `server_id`, `mode`, `enabled`, `real_lsp_enabled`, `command`, `request_count`, `failure_count`, `install_hint_windows`, and `install_hint_linux_ci`. Backward-compatible top-level fields remain.
+- A parameterized fake generic LSP server (`backend/tests/fixtures/fake_generic_lsp_server.py`) accepts `--language=<server_id>` and returns deterministic symbols (main function, Example class, greet function) plus a definition location and 2 references. This lets one fixture cover the full registry of new languages without writing 9 separate servers.
+
+## Configuration surface
+
+- `LspConfig` now carries per-server fields for every new preset: `go_*`, `rust_*`, `java_*`, `ruby_*`, `php_*`, `csharp_*`, `kotlin_*`, `lua_*`, `clangd_*` (each with `enabled`, `command`, and `workspace_root`).
+- `Settings` exposes matching `AP_<SERVER>_LSP_*` override fields in `backend/app/core/config.py` with `AP_GO_LSP_*`, `AP_RUST_LSP_*`, `AP_JAVA_LSP_*`, `AP_RUBY_LSP_*`, `AP_PHP_LSP_*`, `AP_CSHARP_LSP_*`, `AP_KOTLIN_LSP_*`, `AP_LUA_LSP_*`, `AP_CLANGD_LSP_*`. Each maps to a `*_override` field on the `Settings` model and is plumbed into the validator that copies overrides onto `LspConfig`.
+- `.env.example` and `docker-compose.yml` (both `backend` and `backend-worker` services) thread all of the new env vars. All start disabled (`false`).
+
+## Test coverage
+
+- New `backend/tests/test_lsp_registry.py` adds 20 tests:
+  - Registry metadata: every expected preset exists; every preset has non-empty `default_command` and install hints.
+  - Extension-to-language mapping for `.go`, `.rs`, `.java`, `.c`, `.cpp`, `.h`, `.hpp`, `.rb`, `.php`, `.cs`, `.kt`, `.kts`, `.lua`, `.py`, `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.mts`, `.cts`.
+  - `lsp_language_id` round-trip for each registered language.
+  - `is_supported_code_file` accepts LSP files and rejects `.md`/`.txt`/`.bin`.
+  - Registry helper consistency: `get_preset`, `get_preset_for_file`, `get_preset_for_language` all return the same preset for the matching input.
+  - `/health/codeintel` includes all 11 expected servers (python, typescript, go, rust, java, clangd, ruby, php, csharp, kotlin, lua) with `enabled=False` by default.
+  - Disabled new language (Go) returns `source=static_fallback`, `lsp_server=none`, `fallback_reason=go_lsp_disabled`.
+  - Missing command falls back to static and reports `failed` or `missing_command`.
+  - Fake generic LSP for Go/Rust/Java/Ruby/PHP/C#/Kotlin/Lua/clangd (`.c` and `.cpp`) all return `source=real_lsp` with the matching `lsp_server` and a non-empty symbol set.
+  - Workspace root safety for new languages (outside-root path is blocked).
+- All existing Python + TS/JS LSP tests (42) continue to pass unchanged.
+
