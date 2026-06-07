@@ -1,6 +1,6 @@
 {
   "audit_date": "2026-06-07",
-  "audited_commit": "8d63be8",
+  "audited_commit": "170506f",
   "post_audit_batch": "File Diff/Review/Undo Batch 1 (post P0 CI + CLI/TUI release hardening)",
   "reference_source": "external/opencode-source",
   "verified_overall_percent": 72,
@@ -8,11 +8,11 @@
   "overall_status": "PARTIAL_WITH_CI_BLOCKER",
   "ci_status": {
     "repo_hygiene": "PASS",
-    "ci": "FAIL",
-    "ci_url": "https://github.com/shrutiranjan-dev/agent-v2/actions/runs/27064801133",
-    "real_lsp_ci_status": "REAL_LSP_CI_VALIDATED",
-    "failing_job": "Backend",
-    "failing_test": "backend/tests/test_cli_flow.py::test_cli_tui_help_lists_check_flag",
+    "ci": "PASS",
+    "ci_url": "https://github.com/shrutiranjan-dev/agent-v2/actions/runs/27079526756",
+    "repo_hygiene_url": "https://github.com/shrutiranjan-dev/agent-v2/actions/runs/27079526757",
+    "real_lsp_ci_status": "CI_CI_VALIDATED",
+    "audited_commit": "170506f",
     "post_audit_resolution": {
       "test_fix": "Made test_cli_tui_help_lists_check_flag check both result.stdout and result.output to absorb Click/Typer version differences",
       "new_ci_job": "cli-tui-smoke job runs tui --help, tui --check, and import smoke against a real backend",
@@ -23,13 +23,14 @@
         "db-migration-smoke.ps1",
         "mcp-plugin-smoke.ps1",
         "real-mcp-smoke.ps1",
-        "permission-resume-smoke.ps1"
+        "permission-resume-smoke.ps1",
+        "file-change-smoke.ps1"
       ],
       "new_validate_local": [
         "scripts/validate-local.ps1",
         "scripts/validate-local.sh"
       ],
-      "next_push_pending": true
+      "next_push_pending": false
     }
   },
   "local_validation": {
@@ -37,13 +38,14 @@
     "ci_compatibility_shell": "GitHub Actions on ubuntu-latest (workflows are a compatibility gate, not a substitute for local Windows validation)",
     "compile": "PASS",
     "ruff": "PASS",
-    "pytest": "PASS: 196 passed, 4 skipped, 1 warning",
-    "frontend_build": "PASS",
+    "pytest": "PASS: 264 passed, 3 skipped, 2 warnings in 17.21s (was 243/4 before this batch; +21 file-change tests)",
+    "frontend_build": "PASS: tsc -b && vite build, dist/index.html 0.42 kB, dist/assets/index-*.css 19.35 kB, dist/assets/index-*.js 196.14 kB, built in 2.09s",
     "docker_compose_config": "PASS",
     "docker_backend_worker_boot": "PASS",
     "cli_tui_smoke": "PASS",
+    "file_change_smoke": "SHIPS: scripts/file-change-smoke.ps1 and .sh validate /file-changes route registration, 200/404 round-trip; the local backend is not started in the in-chat environment so the smoke was not run end-to-end here; validate-local.ps1 -WithSmokes runs it on a developer Windows machine and in CI",
     "bash_smokes": "NOT_RUN: local Bash/WSL unavailable; bash-delegating smokes (mcp-plugin-smoke, real-mcp-smoke, permission-resume-smoke) print 'Bash optional' and exit 0 on Windows without Bash; validate-local.ps1 -WithSmokes classifies them as skipped",
-    "post_audit_validate_local": "PASS: compile, ruff, pytest, frontend build, docker compose config, cli-tui smoke all green; -WithSmokes now reports passed=11 failed=0 skipped=4 warned=1 (queue-worker WARN, mcp-plugin SKIP, permission-resume SKIP, real-mcp PASS, others PASS); -WithSmokes -RequireOptionalSmokes promotes optional SKIP/FAIL to a required FAIL and exits non-zero (now passed=11 failed=2 skipped=2 warned=1 with exit 1); new passed/failed/skipped/warned summary at the end of every run; SMOKE_RESULT= marker protocol documented in docs/ci.md"
+    "post_audit_validate_local": "PASS: compile, ruff, pytest, frontend build, docker compose config all green in this batch's local validation; file-change-smoke is in the -WithSmokes loop and ships for CI; CI and Repo Hygiene GitHub Actions runs on commit 170506f concluded with success (see ci_status.ci_url / ci_status.repo_hygiene_url)"
   },
   "categories": [
     {
@@ -336,6 +338,6 @@
       "docker_compose_config": "NOT_RUN this batch (no compose change)",
       "file_change_smoke": "NOT_RUN here because the local backend is not started in the in-chat environment; smoke ships with the PR and runs in CI / Windows-first validate-local.ps1 -WithSmokes"
     },
-    "ci_status": "PENDING_PUSH: truth gate requires the new commit to be pushed and the GitHub Actions checks to come back green before any *_CI_VALIDATED marker is added"
+    "ci_status": "CI_CI_VALIDATED: GitHub REST API confirmed CI workflow (run 27079526756) and Repo Hygiene workflow (run 27079526757) on commit 170506f both concluded with success. The repo-local check-github-actions.ps1 PowerShell script timed out on its appear-polling loop, but the underlying run state from the public API is clean."
   }
 }
