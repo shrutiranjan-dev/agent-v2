@@ -1416,7 +1416,7 @@ Date: 2026-06-07
 ## TS LSP status
 
 - `TS_LSP_IMPLEMENTED_FAKE_TESTED`: fake TypeScript LSP server (`backend/tests/fixtures/fake_ts_lsp_server.py`) exercises document symbols (function `greet`, class `Greeter`), definition, references, and diagnostics against the same `LspClient` / JSON-RPC lifecycle used by the Python path.
-- `TS_LSP_CI_JOB_ADDED_PENDING_REMOTE_VALIDATION`: a mandatory `real-typescript-lsp-smoke` CI job is added to `.github/workflows/ci.yml`. It installs Node 20 + `npm ci --prefix frontend`, starts the backend with `AP_TS_LSP_ENABLED=true AP_TS_LSP_COMMAND=./frontend/node_modules/.bin/typescript-language-server --stdio`, and runs `scripts/ts-lsp-smoke.sh --real`. The verifier has not yet confirmed a green CI run against the public GitHub Actions API, so the status is not `TS_LSP_CI_VALIDATED`.
+- `TS_LSP_CI_VALIDATED`: the mandatory `real-typescript-lsp-smoke` CI job passed green on the public GitHub Actions API (verified via `check-github-actions.ps1`). It installed Node 20 + `npm ci --prefix frontend`, started the backend with `AP_TS_LSP_ENABLED=true AP_TS_LSP_COMMAND=./frontend/node_modules/.bin/typescript-language-server --stdio`, and `scripts/ts-lsp-smoke.sh --real` printed `TS_LSP=passed`.
 - Live real TS LSP local smoke is supported: `powershell -ExecutionPolicy Bypass -File scripts/ts-lsp-smoke.ps1 -Real` prints `TS_LSP=passed` after verifying Node/npm/typescript-language-server availability and observing `source: real_lsp` with `lsp_server: typescript` in a `/code/symbols` response body. Default mode prints `TS_LSP=disabled_static_fallback`.
 
 ## Implementation details
@@ -1446,11 +1446,11 @@ Date: 2026-06-07
 
 Final validation: `.venv\Scripts\pytest backend\tests` passes with **223 passed, 4 skipped** (was 212 + 4 skipped before this batch). `.venv\Scripts\python -m compileall backend\app` and `.venv\Scripts\python -m ruff check backend\app backend\tests` pass.
 
-- Code Intelligence and LSP: `verified_percent` raised from 86 to 90, status remains `PARTIAL` (only Python + TS/JS LSP covered; other languages are static-only). Python LSP is `REAL_LSP_CI_VALIDATED`. TypeScript/JS LSP is `TS_LSP_IMPLEMENTED_FAKE_TESTED` with `TS_LSP_CI_JOB_ADDED_PENDING_REMOTE_VALIDATION`.
+- Code Intelligence and LSP: `verified_percent` raised from 86 to 90, status remains `PARTIAL` (only Python + TS/JS LSP covered; other languages are static-only). Python LSP is `REAL_LSP_CI_VALIDATED`. TypeScript/JS LSP is `TS_LSP_CI_VALIDATED`.
 
 ## Remaining LSP gaps
 
-1. TS LSP CI validation: the `real-typescript-lsp-smoke` CI job is added but the verifier has not yet confirmed a green run. After confirmation, status becomes `TS_LSP_CI_VALIDATED`.
+1. TS LSP CI validation: `TS_LSP_CI_VALIDATED` confirmed via `check-github-actions.ps1` (commit 37d4e9f CI green).
 2. Other languages beyond Python and TypeScript/JS (Rust, Go, etc.).
 3. `textDocument/hover`, `textDocument/completion`, and `workspace/symbol` coverage.
 4. Multi-document workspace diagnostics and incremental sync.

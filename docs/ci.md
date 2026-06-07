@@ -118,7 +118,7 @@ local Windows validation.
 
 The `real-typescript-lsp-smoke` job in `.github/workflows/ci.yml` is mandatory in default CI.
 
-Status: `TS_LSP_CI_JOB_ADDED_PENDING_REMOTE_VALIDATION`
+Status: `TS_LSP_CI_VALIDATED`
 
 It:
 
