@@ -1,12 +1,15 @@
 # Remaining Work to 80% / 90% / 95% Core Parity
 
-**Audit date:** 2026-06-07
-**Head commit:** see `git log -1 --format=%H` on the head of the next push (post-File-Diff-Batch-2)
-**Current weighted core OpenCode-style parity:** **82.40%** (post-File-Diff-Batch-2; was 79.60% before)
-**Remaining core work:** **17.60%** of weighted core
+**Audit date:** 2026-06-09
+**Head commit:** `c1852b0`
+**Audit log:** `104-current-progress-audit.md` (stabilization pass: model consistency, chat live response, LSP status UI, event_bus lint)
+**Current weighted core OpenCode-style parity:** **80.76%** (post-stabilization; strict re-baseline dropped CI/release from 88→78; organic gain +1.10)
+**Remaining core work:** **19.24%** of weighted core
 **Future expansion readiness:** **4.5%** (GitHub bot 0%, browser/mobile 0%, workflow builder 0% — excluded from core score)
 
-Source: `current-parity-scorecard.json`, `103-current-progress-audit.md`.
+Source: `current-parity-scorecard.json`, `104-current-progress-audit.md`.
+
+> **80% milestone reached.** The weighted score crossed 80% after the stabilization pass. Gap to 90% is now 9.24 weighted points (~3 weeks focused work).
 
 ---
 

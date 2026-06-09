@@ -135,12 +135,12 @@ class EventBus:
         async def _send(ws: WebSocket) -> None:
             try:
                 await asyncio.wait_for(ws.send_json(envelope), timeout=5)
-            except (asyncio.TimeoutError, Exception):
+            except (TimeoutError, Exception):
                 raise
 
         results = await asyncio.gather(*[_send(ws) for ws in targets], return_exceptions=True)
         stale: list[WebSocket] = [
-            ws for ws, exc in zip(targets, results) if isinstance(exc, Exception)
+            ws for ws, exc in zip(targets, results, strict=True) if isinstance(exc, Exception)
         ]
         if stale:
             async with self._lock:
@@ -165,14 +165,14 @@ class EventBus:
                 timeout=5,
             )
             return True
-        except (asyncio.TimeoutError, RedisError, OSError, ValueError, TypeError):
+        except (TimeoutError, RedisError, OSError, ValueError, TypeError):
             return False
         finally:
             close = getattr(client, "aclose", None)
             if close:
                 try:
                     await asyncio.wait_for(close(), timeout=2)
-                except (asyncio.TimeoutError, Exception):
+                except (TimeoutError, Exception):
                     pass
 
     async def _redis_forward_loop(self, websocket: WebSocket, session_id: UUID) -> None:

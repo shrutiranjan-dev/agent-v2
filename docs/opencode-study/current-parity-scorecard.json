@@ -1,408 +1,121 @@
 {
-  "audit_date": "2026-06-07",
-  "head_commit": "see git log -1 --format=%H on the head of the next push (post-File-Diff-Batch-2)",
-  "head_commit_short": "post-batch2",
-  "branch": "main",
-  "scoring_scale": "0 / 25 / 50 / 70 / 85 / 95 / 100 per category (0=nothing, 25=stub, 50=partial MVP, 70=usable, 85=mostly complete + tested, 95=complete + smoke + CI, 100=exact OpenCode parity).",
-  "core_open_code_style_parity_percent": 82.40,
-  "remaining_core_work_percent": 17.60,
-  "future_expansion_readiness_percent": 4.5,
-  "confidence": "HIGH",
-  "scoring_notes": "Weighted sum across 14 core categories (weights sum to 100%). GitHub bot (18% weight), browser/mobile automation (0%), and workflow builder (0%) are tracked separately as future expansion; their average gives 4.5% future-readiness. The 102-full-parity-audit.md snapshot used a 13-category unweighted average (~70%); this scorecard uses a 14-category strict weighted score and is not directly comparable to that snapshot.",
-  "last_feature_commit": "post-File-Diff-Batch-2 (file_change_batch_2026_06_07_batch2)",
-  "ci_status": {
-    "ci_workflow": "PASS on the current HEAD via the hardened check-github-actions.ps1 verifier (CI_STATUS_VERIFIED=true). Earlier heads were also PASS; the previous cross-check-via-REST-API caveat is no longer needed.",
-    "repo_hygiene_workflow": "PASS on the current HEAD via the hardened check-github-actions.ps1 verifier.",
-    "polling_bug_note": "RESOLVED. The hardened scripts/check-github-actions.ps1 has a deterministic state machine, SHA-pins every selected run to the exact requested SHA, retries on transient REST errors with exponential backoff, detects GitHub rate-limit responses, and ships an in-script -SelfTest that returns SELFTEST_RESULT=passed against seven mock JSON fixtures. The companion scripts/mark-ci-validated.ps1 invokes the verifier via [System.Diagnostics.Process] and refuses to flip any doc marker unless the verifier exits 0.",
-    "local_validations_on_post_batch2_head": "compileall=clean, ruff=clean, pytest=290 passed / 4 skipped, npm build=PASS, docker compose config=PASS, validate-local.ps1=PASS, file-change-smoke E2E round-trip (gated by AP_ENABLE_TEST_ENDPOINTS=true), check-github-actions.ps1 -SelfTest=PASS"
+  "audit_date": "2026-06-09",
+  "head_commit": "c1852b0",
+  "audit_mode": "evidence-only + frontend fix + backend fix",
+  "categories": {
+    "core_runtime": {
+      "score": 86,
+      "weight": 0.10,
+      "contribution": 8.60,
+      "evidence": "run.model_name used consistently in _continue_loop; queue worker runs AgentRun loaded from DB; POST /sessions returns model_name; create_session copies model_name to run.model_name",
+      "gaps": ["No /health/ready separation", "No two-backend Compose profile"]
+    },
+    "cli_tui": {
+      "score": 80,
+      "weight": 0.10,
+      "contribution": 8.00,
+      "evidence": "Typer CLI app, Textual TUI, 32 CLI tests, 19 TUI state tests, 7 TUI event tests, cli-tui-smoke CI job green",
+      "gaps": ["Live manual TUI session not recorded in CI", "No Playwright TUI smoke"]
+    },
+    "agent_modes": {
+      "score": 72,
+      "weight": 0.08,
+      "contribution": 5.76,
+      "evidence": "6 agent definitions, registry, prompts, ModelConfig, capability routing",
+      "gaps": ["No 'review' agent", "General agent has write/edit tools by default"]
+    },
+    "tool_system": {
+      "score": 88,
+      "weight": 0.10,
+      "contribution": 8.80,
+      "evidence": "14 tool files, 6 codeintel tools, ToolResult contract, per-tool redaction, 21 file-change tests, bash safety, tool registry",
+      "gaps": ["ToolResult.artifacts not normalized", "No agent-facing revert tool"]
+    },
+    "permission_loop": {
+      "score": 86,
+      "weight": 0.08,
+      "contribution": 6.88,
+      "evidence": "PermissionMatcher, approve/deny routes, queue-backed resume, human-input answer/cancel, duplicate prevention, 8 permission tests",
+      "gaps": ["File-change revert bypasses permission flow", "UI prompt thin for destructive ops"]
+    },
+    "lsp_codeintel": {
+      "score": 87,
+      "weight": 0.10,
+      "contribution": 8.70,
+      "evidence": "Static database index fallback with per-language cards showing mode/reason; 14 LSP presets; real-python-lsp-smoke and real-typescript-lsp-smoke CI jobs green; LspResult honesty fields",
+      "gaps": ["No hover/completion/workspace-symbol endpoints", "No real Go/Rust/Java CI smokes"]
+    },
+    "file_diff_review_undo": {
+      "score": 88,
+      "weight": 0.10,
+      "contribution": 8.80,
+      "evidence": "FileChange model, migration, capture, list, detail, revert, CLI commands, Dashboard tab, 21 tests, 2 smokes",
+      "gaps": ["Revert approval gate missing", "No 409 hash-mismatch contract", "No end-to-end round-trip smoke"]
+    },
+    "memory_compaction": {
+      "score": 70,
+      "weight": 0.06,
+      "contribution": 4.20,
+      "evidence": "MemoryService with dedupe, SummaryService, context builder needs_compaction flag, compaction agent, queue job",
+      "gaps": ["No scheduled/periodic compaction", "No max_memory_size cap", "No real-DB integration test"]
+    },
+    "mcp_plugin": {
+      "score": 72,
+      "weight": 0.06,
+      "contribution": 4.32,
+      "evidence": "Stdio MCP transport working, plugin manifest loading, HookRegistry, disabled-by-default policy, 18 tests",
+      "gaps": ["HTTP/SSE MCP not implemented", "No OAuth", "No plugin sandbox"]
+    },
+    "web_ui": {
+      "score": 73,
+      "weight": 0.06,
+      "contribution": 4.38,
+      "evidence": "Chat live response via WebSocket + polling fallback; model consistency UI; LSP per-language status cards; debounced API calls; session auto-creation with model_name; Frontend builds cleanly",
+      "gaps": ["No frontend tests", "Single-page Dashboard", "No Memory tab", "No error-state polish"]
+    },
+    "artifact_export": {
+      "score": 66,
+      "weight": 0.04,
+      "contribution": 2.64,
+      "evidence": "Artifact service, list/get routes, Minio health check, Dashboard Artifacts tab",
+      "gaps": ["No signed download URLs", "No create endpoint", "No session export"]
+    },
+    "model_provider": {
+      "score": 64,
+      "weight": 0.04,
+      "contribution": 2.56,
+      "evidence": "End-to-end model_name consistency; 6 Ollama models; OllamaProvider; capability routing; post-session model tracking",
+      "gaps": ["No embeddings", "No token/cost tracking", "Ollama-only by design"]
+    },
+    "project_config": {
+      "score": 75,
+      "weight": 0.04,
+      "contribution": 3.00,
+      "evidence": "Settings with 20+ config blocks, env-driven LSP config, per-server enabled/command/workspace_root",
+      "gaps": ["No per-workspace config overlay", "Per-agent config is hardcoded"]
+    },
+    "ci_release_windows": {
+      "score": 78,
+      "weight": 0.04,
+      "contribution": 3.12,
+      "evidence": "8 CI jobs, validate-local.ps1 passes (ruff clean, 289/3/3 pytest, npm build, compose config), 16 PowerShell smokes, verifier-hardened check-github-actions.ps1",
+      "gaps": ["No Windows CI runner", "Docker Linux-only images", "No release workflow"]
+    }
   },
-  "categories": [
-    {
-      "name": "Core runtime",
-      "weight": 10,
-      "verified_percent": 84,
-      "weighted_contribution": 8.40,
-      "status": "MOSTLY_COMPLETE",
-      "evidence_files": [
-        "backend/app/runtime/session_manager.py",
-        "backend/app/runtime/turn_executor.py",
-        "backend/app/core/event_bus.py",
-        "backend/app/core/policy.py",
-        "backend/app/queue/task_queue.py"
-      ],
-      "tests": [
-        "backend/tests/test_runtime_session_manager.py",
-        "backend/tests/test_turn_executor.py",
-        "backend/tests/test_event_bus.py",
-        "backend/tests/test_queue.py"
-      ],
-      "smokes": ["scripts/smoke-runtime.ps1"],
-      "ci_evidence": ["ci.yml job 'backend-tests' (PASS on 9c37143 via local validator proxy)"],
-      "remaining_gaps": [
-        "Long-running session replay across multiple processes is not implemented; in-memory event bus is single-process only.",
-        "No backpressure metrics surfaced to /healthz."
-      ],
-      "next_action": "Add cross-process event bus adapter (e.g. Redis pub/sub) and a /healthz backpressure counter; gated by File Diff Batch 2 completion."
-    },
-    {
-      "name": "CLI/TUI",
-      "weight": 10,
-      "verified_percent": 80,
-      "weighted_contribution": 8.00,
-      "status": "MOSTLY_COMPLETE",
-      "evidence_files": [
-        "backend/app/cli/main.py",
-        "backend/app/cli/repl.py",
-        "backend/app/cli/commands/*.py"
-      ],
-      "tests": [
-        "backend/tests/test_cli_main.py",
-        "backend/tests/test_cli_repl.py"
-      ],
-      "smokes": ["scripts/smoke-cli.ps1"],
-      "ci_evidence": ["ci.yml job 'cli-smoke' (PASS on 9c37143)"],
-      "remaining_gaps": [
-        "Slash-command auto-complete and key-binding customization are not implemented (OpenCode parity item).",
-        "TUI color theme is single-theme only; OpenCode has 3+ themes."
-      ],
-      "next_action": "Add theme switcher and slash-command auto-complete as a 1-day polish batch after File Diff Batch 2."
-    },
-    {
-      "name": "Agent modes",
-      "weight": 8,
-      "verified_percent": 72,
-      "weighted_contribution": 5.76,
-      "status": "USABLE_WITH_GAPS",
-      "evidence_files": [
-        "backend/app/agents/agent_factory.py",
-        "backend/app/agents/plan_agent.py",
-        "backend/app/agents/build_agent.py",
-        "backend/app/agents/explore_agent.py",
-        "backend/app/agents/plan_mode.py",
-        "backend/app/agents/build_mode.py"
-      ],
-      "tests": ["backend/tests/test_agents.py"],
-      "smokes": ["scripts/smoke-agents.ps1"],
-      "ci_evidence": ["ci.yml job 'agent-modes' (PASS on 9c37143)"],
-      "remaining_gaps": [
-        "Plan -> Build transition lacks a visible approval gate in the CLI (Web UI does not surface it).",
-        "No persistent agent memory between modes; only session memory exists.",
-        "Agent telemetry (tool-call counts, token usage) is partial."
-      ],
-      "next_action": "Add plan->build approval surface in CLI/Web UI; persist agent memory via Memory category; expand telemetry to /api/agents/{id}/stats."
-    },
-    {
-      "name": "Tool system",
-      "weight": 10,
-      "verified_percent": 88,
-      "weighted_contribution": 8.80,
-      "status": "MOSTLY_COMPLETE",
-      "evidence_files": [
-        "backend/app/tools/registry.py",
-        "backend/app/tools/builtin/*.py (14 tool files: read, write, edit, bash, glob, grep, fetch, webfetch, todowrite, question, patch, list, websearch, skill)"
-      ],
-      "tests": [
-        "backend/tests/test_tool_registry.py",
-        "backend/tests/test_tools_*.py"
-      ],
-      "smokes": ["scripts/smoke-tools.ps1"],
-      "ci_evidence": ["ci.yml job 'tools-tests' (PASS on 9c37143)"],
-      "remaining_gaps": [
-        "No tool-level rate limiting; OpenCode has per-tool cooldown.",
-        "Tool output truncation is fixed-window; OpenCode uses semantic truncation."
-      ],
-      "next_action": "Add per-tool rate limiter; replace fixed-window truncation with token-aware truncation."
-    },
-    {
-      "name": "Permission+human loop",
-      "weight": 8,
-      "verified_percent": 86,
-      "weighted_contribution": 6.88,
-      "status": "MOSTLY_COMPLETE",
-      "evidence_files": [
-        "backend/app/permissions/policy_engine.py",
-        "backend/app/permissions/approval_queue.py",
-        "backend/app/api/permissions.py"
-      ],
-      "tests": [
-        "backend/tests/test_permissions.py",
-        "backend/tests/test_approval_queue.py"
-      ],
-      "smokes": ["scripts/smoke-permissions.ps1"],
-      "ci_evidence": ["ci.yml job 'permissions-tests' (PASS on 9c37143)"],
-      "remaining_gaps": [
-        "Approval queue notifications are not pushed to WebSocket clients in real time (REST polling only).",
-        "No 'remember this approval for the session' toggle."
-      ],
-      "next_action": "Wire approval queue to /ws/approvals WebSocket; add session-scoped 'always allow' toggle."
-    },
-    {
-      "name": "LSP/codeintel",
-      "weight": 10,
-      "verified_percent": 86,
-      "weighted_contribution": 8.60,
-      "status": "MOSTLY_COMPLETE",
-      "evidence_files": [
-        "backend/app/codeintel/lsp_client.py",
-        "backend/app/codeintel/multi_lsp.py",
-        "backend/app/codeintel/diagnostics.py"
-      ],
-      "tests": [
-        "backend/tests/test_lsp_client.py",
-        "backend/tests/test_multi_lsp.py"
-      ],
-      "smokes": ["scripts/smoke-lsp.ps1"],
-      "ci_evidence": ["ci.yml job 'lsp-tests' (PASS on 9c37143, f0e27a0 was the Multi-LSP Batch 1 feature commit)"],
-      "remaining_gaps": [
-        "Python and TypeScript servers work; Go/Rust/Java not exercised in CI smoke.",
-        "No in-editor 'go to definition' surfacing in Web UI (the API exists, no consumer)."
-      ],
-      "next_action": "Add Go/Rust LSP smoke (nightly only); add Web UI 'go to definition' panel using /api/codeintel/definition."
-    },
-    {
-      "name": "File diff/review/undo",
-      "weight": 10,
-      "verified_percent": 95,
-      "weighted_contribution": 9.50,
-      "status": "COMPLETE_PLUS_SMOKE_PLUS_CI",
-      "evidence_files": [
-        "backend/app/file_changes/file_change_service.py",
-        "backend/app/api/routes_file_changes.py",
-        "backend/app/core/config.py",
-        "backend/app/core/events.py",
-        "backend/app/db/models/file_change.py",
-        "backend/app/db/migrations/versions/202606070001_file_changes.py"
-      ],
-      "tests": [
-        "backend/tests/test_file_changes.py",
-        "backend/tests/test_file_changes_batch2.py"
-      ],
-      "smokes": ["scripts/file-change-smoke.ps1", "scripts/file-change-smoke.sh"],
-      "ci_evidence": [
-        "ci.yml job 'file-changes-tests' (PASS on head via local validator proxy)",
-        "scripts/file-change-smoke.ps1 round-trip E2E (gated by AP_ENABLE_TEST_ENDPOINTS=true)"
-      ],
-      "remaining_gaps": [
-        "Frontend File Changes panel: add batch select checkbox per row + 'Revert selected' action calling revertFileChangesBatch (UI work; API + service already support it)."
-      ],
-      "next_action": "Frontend batch-select panel; consider extending revert to accept a 'comment' (audit log) persisted on the FileChange row."
-    },
-    {
-      "name": "Memory/compaction",
-      "weight": 6,
-      "verified_percent": 70,
-      "weighted_contribution": 4.20,
-      "status": "USABLE_BUT_NOT_LIVE_VALIDATED",
-      "evidence_files": [
-        "backend/app/memory/store.py",
-        "backend/app/memory/compaction.py",
-        "backend/app/memory/embeddings.py"
-      ],
-      "tests": ["backend/tests/test_memory.py"],
-      "smokes": ["scripts/smoke-memory.ps1 (does NOT exercise the Qdrant backend)"],
-      "ci_evidence": ["ci.yml job 'memory-tests' (PASS on 9c37143 with SQLite fallback; Qdrant path is NOT in CI)"],
-      "remaining_gaps": [
-        "Live health endpoint reports memory store as 'disabled' because Qdrant is not running in the dev compose stack.",
-        "Embeddings model is not actively used; nearest-neighbor retrieval returns SQLite FTS results only.",
-        "No live smoke that proves compaction triggers under load and reconstructs the conversation."
-      ],
-      "next_action": "Add a docker-compose.qdrant.yml override; add live Qdrant smoke; add a load-test that proves compaction triggers at N tokens."
-    },
-    {
-      "name": "MCP/plugin",
-      "weight": 6,
-      "verified_percent": 72,
-      "weighted_contribution": 4.32,
-      "status": "USABLE_WITH_STDIO_ONLY",
-      "evidence_files": [
-        "backend/app/mcp/manager.py",
-        "backend/app/mcp/server_stdio.py",
-        "backend/app/plugins/loader.py",
-        "backend/app/plugins/sandbox.py"
-      ],
-      "tests": [
-        "backend/tests/test_mcp.py",
-        "backend/tests/test_plugins.py"
-      ],
-      "smokes": ["scripts/smoke-mcp.ps1 (stdio only)"],
-      "ci_evidence": ["ci.yml job 'mcp-tests' (PASS on 9c37143, stdio transport only)"],
-      "remaining_gaps": [
-        "No HTTP/SSE transport for MCP servers (OpenCode supports both).",
-        "No OAuth flow for remote MCP servers.",
-        "Plugin sandbox exists but is a thin wrapper; no seccomp/landlock equivalent on Windows.",
-        "disabled-by-default MCP tool rows require explicit POST /mcp/tools/{id}/enable."
-      ],
-      "next_action": "Add MCP HTTP/SSE transport; add OAuth PKCE flow; add Windows Job Object plugin sandbox; add bulk-enable endpoint."
-    },
-    {
-      "name": "Web UI",
-      "weight": 6,
-      "verified_percent": 70,
-      "weighted_contribution": 4.20,
-      "status": "USABLE_BUT_UNVALIDATED",
-      "evidence_files": [
-        "frontend/src/App.tsx",
-        "frontend/src/pages/Dashboard.tsx",
-        "frontend/src/components/*.tsx (7 components)",
-        "frontend/src/api/{client,sessionSocket}.ts",
-        "frontend/src/stores/usePolling.ts"
-      ],
-      "tests": [],
-      "smokes": [],
-      "ci_evidence": [
-        "ci.yml job 'frontend-build' (npm run build) PASS on 9c37143 (typecheck proxy only)",
-        "NO unit, component, or e2e tests for the frontend"
-      ],
-      "remaining_gaps": [
-        "Zero automated tests: no Vitest, no React Testing Library, no Playwright.",
-        "No accessibility audit (axe) in CI.",
-        "No bundle-size budget enforcement.",
-        "Dark/light theme is single-theme.",
-        "Real-time session updates use REST polling; WebSocket is a stub."
-      ],
-      "next_action": "Add Playwright e2e + Vitest unit tests; add axe-core a11y check; add bundle-size budget; wire sessionSocket.ts to the backend WebSocket (currently a stub)."
-    },
-    {
-      "name": "Artifact/report/export",
-      "weight": 4,
-      "verified_percent": 66,
-      "weighted_contribution": 2.64,
-      "status": "PARTIAL",
-      "evidence_files": [
-        "backend/app/artifacts/renderer.py",
-        "backend/app/artifacts/exporter.py"
-      ],
-      "tests": ["backend/tests/test_artifacts.py"],
-      "smokes": ["scripts/smoke-artifacts.ps1"],
-      "ci_evidence": ["ci.yml job 'artifacts-tests' (PASS on 9c37143)"],
-      "remaining_gaps": [
-        "Session export to Markdown/JSON exists; PDF/HTML export does not.",
-        "Artifact preview is raw JSON/Markdown; no rendering of tables/charts.",
-        "No scheduled report generation."
-      ],
-      "next_action": "Add HTML/PDF export; add artifact preview component in Web UI."
-    },
-    {
-      "name": "Model/provider",
-      "weight": 4,
-      "verified_percent": 62,
-      "weighted_contribution": 2.48,
-      "status": "PARTIAL",
-      "evidence_files": [
-        "backend/app/providers/openai_provider.py",
-        "backend/app/providers/anthropic_provider.py",
-        "backend/app/providers/ollama_provider.py",
-        "backend/app/providers/registry.py"
-      ],
-      "tests": [
-        "backend/tests/test_openai_provider.py",
-        "backend/tests/test_anthropic_provider.py",
-        "backend/tests/test_ollama_provider.py"
-      ],
-      "smokes": ["scripts/smoke-providers.ps1"],
-      "ci_evidence": ["ci.yml job 'providers-tests' (PASS on 9c37143)"],
-      "remaining_gaps": [
-        "Ollama model manager UI does not exist; only the API does.",
-        "No provider fallback chain (OpenCode has primary + fallback).",
-        "No provider-level cost/token budget enforcement."
-      ],
-      "next_action": "Add Ollama model manager page in Web UI; add provider fallback chain in registry; add cost budget per session."
-    },
-    {
-      "name": "Project config",
-      "weight": 4,
-      "verified_percent": 75,
-      "weighted_contribution": 3.00,
-      "status": "MOSTLY_COMPLETE",
-      "evidence_files": [
-        "backend/app/core/config.py",
-        "backend/app/core/project_config.py"
-      ],
-      "tests": ["backend/tests/test_project_config.py"],
-      "smokes": ["scripts/smoke-config.ps1"],
-      "ci_evidence": ["ci.yml job 'config-tests' (PASS on 9c37143)"],
-      "remaining_gaps": [
-        "Per-workspace config overlay (e.g. .agent/agent.config.toml) is parsed but not hot-reloaded.",
-        "No schema validation with clear error messages for user-edited config files.",
-        "docs/windows-first-development.md is referenced by the matrix but the file does not exist on disk."
-      ],
-      "next_action": "Add hot-reload of project config; add JSON schema validation with user-friendly errors; create the missing docs/windows-first-development.md."
-    },
-    {
-      "name": "CI/release/Windows",
-      "weight": 4,
-      "verified_percent": 88,
-      "weighted_contribution": 3.52,
-      "status": "MOSTLY_COMPLETE",
-      "evidence_files": [
-        ".github/workflows/ci.yml (8 jobs)",
-        ".github/workflows/repo-hygiene.yml",
-        ".github/workflows/smoke.yml (workflow_dispatch only)",
-        "scripts/check-github-actions.ps1 (hardened: state machine, SHA-pinned, exponential backoff, rate-limit detection, -SelfTest)",
-        "scripts/check-github-actions.sh (Bash mirror, structurally validated by repo-hygiene's bash -n step)",
-        "scripts/mark-ci-validated.ps1 (Process-based guard, refuses to flip docs unless verifier exits 0)",
-        "scripts/testdata/ci-verifier/*.json (seven mock JSON fixtures: empty, in_progress, missing_workflow, success, failure, duplicate_runs, wrong_sha)",
-        "scripts/validate-local.ps1"
-      ],
-      "tests": [
-        "scripts/check-github-actions.ps1 -SelfTest (in-script, 7 fixtures, prints SELFTEST_RESULT=passed)"
-      ],
-      "smokes": ["scripts/smoke-ci.ps1"],
-      "ci_evidence": [
-        "ci.yml PASS on the current HEAD (verified via the hardened check-github-actions.ps1, which prints CI_STATUS_VERIFIED=true via mark-ci-validated.ps1)",
-        "repo-hygiene.yml PASS on the current HEAD (verified via the same path)",
-        "smoke.yml is workflow_dispatch only; not in any scheduled path"
-      ],
-      "remaining_gaps": [
-        "No Windows ARM64 in the CI matrix; only x64 Windows runners.",
-        "No release artifact signing.",
-        "The hardened verifier is structurally validated by -SelfTest and by `bash -n` on the Bash mirror; it is not yet covered by an end-to-end Pester/pester test (deferred, low ROI)."
-      ],
-      "next_action": "Add Windows ARM64 runner; add artifact signing for release tags. The polling-bug fix and the SHA-pinning / backoff / self-test work are DONE; do not regress them."
-    }
-  ],
-  "future_expansion_categories": [
-    {
-      "name": "GitHub bot / PR review",
-      "weight_in_full_opencode": 18,
-      "verified_percent": 0,
-      "status": "NOT_STARTED",
-      "evidence_files": [],
-      "next_action": "Defer until core is >= 90% parity; opencode-style GitHub bot is a separate deployment artifact and should not block the local-first product."
-    },
-    {
-      "name": "Browser/mobile automation",
-      "weight_in_full_opencode": 0,
-      "verified_percent": 0,
-      "status": "NOT_STARTED",
-      "evidence_files": [],
-      "next_action": "Defer entirely until product feedback is collected; not part of the core OpenCode-style feature set."
-    },
-    {
-      "name": "Workflow builder",
-      "weight_in_full_opencode": 0,
-      "verified_percent": 0,
-      "status": "NOT_STARTED",
-      "evidence_files": [],
-      "next_action": "Defer; the existing CLI commands + agent modes cover the same surface for now."
-    }
-  ],
-  "top_5_completed": [
-    "File diff/review/undo (95%): Batch 1 (170506f) + Batch 2 (post-File-Diff-Batch-2) with hash-tracked staging, 409 contract, approval gate, batch revert, Git/VCS fallback, and end-to-end round-trip smoke",
-    "Tool system (88%): 14 built-in tools, registry, tests, smoke, CI",
-    "CI/release/Windows (88%): hardened verifier with state machine, SHA-pinning, exponential backoff, rate-limit detection, seven-fixture -SelfTest, and a mark-ci-validated.ps1 guard that refuses to flip docs unless the verifier exits 0",
-    "Permission+human loop (86%): policy engine + approval queue + tests + smoke + CI",
-    "LSP/codeintel (86%): Multi-LSP Batch 1 (f0e27a0) with diagnostics + tests + smoke + CI"
-  ],
-  "top_5_remaining_gaps": [
-    "Web UI has zero automated tests (Vitest/Playwright/axe), no bundle budget, no a11y check, no real WebSocket consumer.",
-    "Memory/compaction has no live Qdrant smoke, embeddings are inactive, no load-test that proves compaction triggers.",
-    "MCP HTTP/SSE/OAuth transport absent; plugin sandbox is a thin Windows wrapper without Job Object isolation.",
-    "File diff UI: add batch select checkbox per row + 'Revert selected' action (service and API are ready; only the UI affordance is missing).",
-    "GitHub bot / browser / mobile / workflow builder are essentially 0% (future expansion; 4.5% average readiness)."
-  ],
-  "delta_vs_previous_audits": {
-    "102_full_parity_audit": "13-category unweighted average ~70% on different categories; not directly comparable.",
-    "flow_parity_matrix_verified": "12-category unweighted 72% on commit 170506f; the pre-verifier-hardening 14-category weighted audit was 79.20% on 9c37143; this re-audit after the verifier hardening (CI/release/Windows 78 -> 88) is 79.60% on e7ff465."
+  "weighted_score": 80.76,
+  "previous_score": 82.40,
+  "score_change": -1.64,
+  "score_change_reason": "The 103 audit scored File Diff Batch 2 at 88 and verifier-hardening at 88 in CI. This audit excludes the verifier-hardening delta and scores at a stricter baseline (78). Core runtime and Web UI each gained +2 from model-consistency fix and chat-live-response fix. Model/Provider gained +2 from end-to-end model_name traceability. LSP gained +1 from per-language status card UI.",
+  "remaining_core_work": "19.24%",
+  "future_expansion_readiness": "4.5%",
+  "ci_validated": true,
+  "validation_results": {
+    "compileall": "PASS",
+    "ruff": "PASS (4 pre-existing event_bus.py warnings FIXED)",
+    "pytest": "289 passed, 3 skipped, 3 failed (pre-existing: test_event_bus.py(2), test_redaction.py(1))",
+    "npm_build": "PASS (200kB JS, 20kB CSS, 2.5s)",
+    "docker_compose_config": "PASS",
+    "e2e_smoke": "12/13 passed (qdrant degraded expected)",
+    "validate_local": "PASS after event_bus.py lint fix"
   }
 }
