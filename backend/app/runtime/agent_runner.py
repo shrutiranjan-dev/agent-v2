@@ -70,7 +70,7 @@ class AgentRunner:
                 payload={
                     "id": str(run.id),
                     "agent_id": agent.id,
-                    "model": session.model_name,
+                    "model": run.model_name,
                     "user_message_id": str(user_message_id) if user_message_id else None,
                 },
             )
@@ -116,7 +116,7 @@ class AgentRunner:
             session_id=session.id,
             agent_run_id=run.id,
             event_type=EventType.AGENT_RUN_STARTED,
-            payload={"id": str(run.id), "agent_id": run.agent_id, "model": session.model_name, "job_id": job_id},
+            payload={"id": str(run.id), "agent_id": run.agent_id, "model": run.model_name, "job_id": job_id},
         )
 
     async def resume_after_permission(
@@ -235,20 +235,20 @@ class AgentRunner:
         agent = agent_registry.get(run.agent_id)
         if run.step_count is None:
             run.step_count = 0
-        selected_capability = capability_for_model(session.model_name, recommended_for=[agent.id])
+        selected_capability = capability_for_model(run.model_name, recommended_for=[agent.id])
         if not selected_capability.enabled:
             return await self._fail_run(
                 db,
                 run=run,
                 session=session,
-                error=f"Model {session.model_name} is disabled by runtime configuration.",
+                error=f"Model {run.model_name} is disabled by runtime configuration.",
             )
         if agent.requires_json_protocol and not selected_capability.supports_json_protocol:
             return await self._fail_run(
                 db,
                 run=run,
                 session=session,
-                error=f"Model {session.model_name} does not support the strict JSON agent protocol.",
+                error=f"Model {run.model_name} does not support the strict JSON agent protocol.",
             )
         provider = get_provider(session.model_provider)
         invalid_repaired = False
@@ -278,7 +278,7 @@ class AgentRunner:
                 session_id=session.id,
                 agent_run_id=run.id,
                 provider=session.model_provider,
-                model=session.model_name,
+                model=run.model_name,
                 status="running",
                 request_json=redact_data({
                     "system": bundle.system_prompt,
@@ -297,11 +297,11 @@ class AgentRunner:
                 session_id=session.id,
                 agent_run_id=run.id,
                 event_type=EventType.MODEL_CALL_STARTED,
-                payload={"id": str(model_call.id), "model": session.model_name},
+                payload={"id": str(model_call.id), "model": run.model_name},
             )
             try:
                 response = await provider.generate(
-                    model=session.model_name,
+                    model=run.model_name,
                     system=bundle.system_prompt,
                     prompt=prompt,
                     temperature=agent.temperature,
@@ -373,7 +373,7 @@ class AgentRunner:
                     db,
                     session=session,
                     content=content,
-                    metadata={"agent_run_id": str(run.id), "model": session.model_name},
+                    metadata={"agent_run_id": str(run.id), "model": run.model_name},
                 )
                 run.status = "completed"
                 run.completed_at = datetime.now(UTC)
@@ -396,7 +396,7 @@ class AgentRunner:
                     run=run,
                     session=session,
                     error='Model JSON response must have type "final" or "tool_call".',
-                    metadata={"model": session.model_name, "reason": "unknown_json_type", "payload": payload},
+                    metadata={"model": run.model_name, "reason": "unknown_json_type", "payload": payload},
                 )
 
             tool_name = str(payload.get("tool", ""))

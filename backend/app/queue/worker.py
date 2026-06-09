@@ -62,7 +62,12 @@ class QueueWorker:
         )
         try:
             while not self._stop.is_set():
-                message = await self.queue.dequeue()
+                try:
+                    message = await self.queue.dequeue()
+                except Exception as exc:
+                    logger.exception("dequeue failed", extra={"error": str(exc)})
+                    await asyncio.sleep(1)
+                    continue
                 if not message:
                     continue
                 async with AsyncSessionLocal() as db:
@@ -90,12 +95,19 @@ class QueueWorker:
                             current_run_id=job.run_id,
                             claimed_jobs_delta=1,
                         )
-                        await self._write_heartbeat()
+                        await self._write_heartbeat(skip_fk_fields=True)
                         logger.info(
                             "queue job claimed",
                             extra={"queue_job_id": str(job_id), "job_type": job_type, "worker_id": self.worker_id},
                         )
                         await self.queue.start_claimed_job(db, job, worker_id=self.worker_id)
+                        await db.commit()
+                        await self._set_state(
+                            status="busy",
+                            current_queue_job_id=job_id,
+                            current_run_id=job.run_id,
+                        )
+                        await self._write_heartbeat()
                         await execute_job(db, job)
                     except Exception as exc:
                         await db.rollback()
@@ -167,12 +179,19 @@ class QueueWorker:
             logger.info("queue worker stopped")
 
     async def _heartbeat_loop(self) -> None:
+        logger.info("heartbeat loop started")
         interval = get_settings().queue.worker_heartbeat_interval_seconds
         while not self._stop.is_set():
             try:
-                await asyncio.wait_for(self._stop.wait(), timeout=interval)
-            except TimeoutError:
+                await asyncio.sleep(interval)
+            except asyncio.CancelledError:
+                logger.info("heartbeat loop cancelled")
+                break
+            try:
+                logger.info("heartbeat loop writing heartbeat")
                 await self._write_heartbeat()
+            except Exception as exc:
+                logger.exception("heartbeat write failed", extra={"error": str(exc)})
 
     async def _set_state(
         self,
@@ -198,7 +217,7 @@ class QueueWorker:
             if last_error is not ...:
                 self.state.last_error = last_error
 
-    async def _write_heartbeat(self, *, started: bool = False, stopped: bool = False) -> None:
+    async def _write_heartbeat(self, *, started: bool = False, stopped: bool = False, skip_fk_fields: bool = False) -> None:
         async with self._state_lock:
             metadata: dict[str, str] = {"worker": "backend-worker"}
             if self.state.last_error:
@@ -208,8 +227,8 @@ class QueueWorker:
                 hostname=self.hostname,
                 process_id=self.process_id,
                 status=self.state.status,
-                current_queue_job_id=self.state.current_queue_job_id,
-                current_run_id=self.state.current_run_id,
+                current_queue_job_id=None if skip_fk_fields else self.state.current_queue_job_id,
+                current_run_id=None if skip_fk_fields else self.state.current_run_id,
                 claimed_jobs_delta=0,
                 completed_jobs_delta=0,
                 failed_jobs_delta=0,

@@ -23,7 +23,7 @@ import {
   TerminalSquare,
   Wrench
 } from "lucide-react";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   Artifact,
   CodeDiagnostic,
@@ -154,27 +154,83 @@ export function Dashboard() {
     setSelectedModel(sessionModel && installedModels.includes(sessionModel) ? sessionModel : installedModels[0]);
   }, [installedModels, selectedModel, selectedSession?.model_name]);
 
+  // Debounce guard: avoid request storm from rapid events
+  const sessionRefreshGuard = useRef(false);
+  const sessionRefreshLast = useRef(0);
+
+  function refreshSessionDetail() {
+    const now = Date.now();
+    if (sessionRefreshGuard.current && now - sessionRefreshLast.current < 2000) return;
+    sessionRefreshGuard.current = true;
+    sessionRefreshLast.current = now;
+    if (!selectedSessionId) { sessionRefreshGuard.current = false; return; }
+    void api.session(selectedSessionId)
+      .then(setSessionDetail)
+      .catch((err) => console.warn("session refresh failed", err))
+      .finally(() => { sessionRefreshGuard.current = false; });
+  }
+
   useEffect(() => {
     if (!selectedSessionId) return;
-    void api.session(selectedSessionId).then(setSessionDetail);
+    refreshSessionDetail();
     void api.sessionEvents(selectedSessionId).then((result) => {
       setLiveEvents((items) => mergeEvents([...result.events, ...items]).slice(0, 80));
     });
+    void permissions.refresh();
+    void humanInputs.refresh();
+    void sessionArtifacts.refresh();
+    void fileChanges.refresh();
     const socket = new SessionEventSocket({
       sessionId: selectedSessionId,
       onStatus: setWsStatus,
       onEvent: (event) => {
         setLiveEvents((items) => mergeEvents([event, ...items]).slice(0, 80));
-        void api.session(selectedSessionId).then(setSessionDetail);
+        const etype = event.event_type ?? event.type;
+        const payload = event.payload ?? {};
+        if (etype === "message.created") {
+          refreshSessionDetail();
+          if (event.session_id === chatSessionId) setChatPending(false);
+        } else if (etype === "agent_run.completed") {
+          refreshSessionDetail();
+          if (event.session_id === chatSessionId) setChatPending(false);
+        } else if (etype === "agent_run.failed") {
+          refreshSessionDetail();
+          if (event.session_id === chatSessionId) {
+            setChatPending(false);
+            setChatError(String(payload.error ?? "Agent run failed"));
+          }
+        } else if (etype === "queue_job.completed") {
+          refreshSessionDetail();
+        } else {
+          refreshSessionDetail();
+        }
         void permissions.refresh();
         void humanInputs.refresh();
-        void sessionArtifacts.refresh();
       },
-      onError: (error) => setChatError(error.message)
+      onError: (error) => {
+        console.warn("WebSocket error", error);
+        setChatError(error.message);
+      }
     });
     socket.connect();
     return () => socket.close();
   }, [selectedSessionId]);
+
+  // Fallback polling: when chat is pending and WebSocket might miss events
+  useEffect(() => {
+    if (!chatPending || !chatSessionId) return;
+    const id = window.setInterval(() => {
+      void api.session(chatSessionId)
+        .then((detail) => {
+          if (detail.messages.some((m) => m.role === "assistant")) {
+            setSessionDetail(detail);
+            setChatPending(false);
+          }
+        })
+        .catch(() => {});
+    }, 3000);
+    return () => window.clearInterval(id);
+  }, [chatPending, chatSessionId]);
 
   const chatMessages = chatSessionId && selectedSessionId === chatSessionId ? sessionDetail?.messages ?? [] : [];
   const chatToolCalls = chatSessionId && selectedSessionId === chatSessionId ? sessionDetail?.tool_calls ?? [] : [];
@@ -199,7 +255,7 @@ export function Dashboard() {
   }, [events.data?.events, liveEvents]);
 
   async function createSession() {
-    const created = await api.createSession({ title: `Session ${new Date().toLocaleTimeString()}`, agent_id: "build" });
+    const created = await api.createSession({ title: `Session ${new Date().toLocaleTimeString()}`, agent_id: "build", model_name: selectedModel || undefined });
     setSelectedSessionId(created.session.id);
     await sessions.refresh();
   }
@@ -211,7 +267,7 @@ export function Dashboard() {
     const agent = String(form.get("agent") ?? "build");
     if (!content || !selectedSessionId) return;
     event.currentTarget.reset();
-    const result = await api.sendMessage(selectedSessionId, content, agent);
+    const result = await api.sendMessage(selectedSessionId, content, agent, selectedModel);
     setSessionDetail({ session: result.session, messages: result.messages, tool_calls: result.tool_calls });
     await sessions.refresh();
     await permissions.refresh();
@@ -464,6 +520,12 @@ export function Dashboard() {
                     ))}
                   </select>
                 </label>
+                {chatSession && selectedModel && chatSession.model_name && selectedModel !== chatSession.model_name && (
+                  <span className="model-mismatch">
+                    <AlertTriangle size={14} />
+                    UI:&nbsp;{selectedModel}&nbsp;· Session:&nbsp;{chatSession.model_name}
+                  </span>
+                )}
               </header>
 
               {chatError && (
@@ -856,6 +918,24 @@ export function Dashboard() {
                 <span>{codeError}</span>
               </div>
             )}
+            <section className="lsp-status-section">
+              <h3>Language servers</h3>
+              <div className="lsp-server-list">
+                {Object.entries(codeHealth.data?.lsp?.lsp_servers ?? {}).map(([lang, info]: [string, any]) => (
+                  <article className="lsp-server-card" key={lang}>
+                    <div className="lsp-server-head">
+                      <strong>{lang}</strong>
+                      <StatusPill value={info.mode === "real" ? "ok" : "disabled"} />
+                    </div>
+                    <span className="muted-copy">
+                      {info.mode === "real" ? "Real LSP active" : `Static fallback (${info.reason ?? "disabled by config"})`}
+                    </span>
+                    {info.command && <code>{info.command}</code>}
+                    {info.last_error && <em>{info.last_error}</em>}
+                  </article>
+                ))}
+              </div>
+            </section>
             <div className="code-metrics">
               <Metric label="Files" value={String(codeMap.data?.code_map.file_count ?? 0)} />
               <Metric label="Symbols" value={String(codeMap.data?.code_map.symbol_count ?? 0)} />

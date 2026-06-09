@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 from backend.app.agents.base import AgentDefinition, ModelConfig
-from backend.app.db.models import Message, ModelCall, Session, ToolCall
+from backend.app.db.models import AgentRun, Message, ModelCall, Session, ToolCall
 from backend.app.runtime.agent_runner import AgentRunner
 from backend.tests.fakes import FakeAsyncSession
 
@@ -136,3 +136,33 @@ async def test_agent_runner_stops_at_max_steps(monkeypatch) -> None:
     assert run.status == "failed"
     assert run.error == "Agent exceeded max steps: 2"
     assert run.step_count == 2
+
+
+async def test_agent_runner_uses_run_model_name_when_session_differs(monkeypatch) -> None:
+    session = make_session()
+    run = AgentRun(
+        id=uuid4(),
+        organization_id=session.organization_id,
+        project_id=session.project_id,
+        workspace_id=session.workspace_id,
+        session_id=session.id,
+        agent_id=session.agent_id,
+        model_provider="ollama",
+        model_name="gemma4:31b-cloud",
+        status="queued",
+    )
+    db = FakeAsyncSession(messages=[make_user_message(session)])
+    db.objects[(AgentRun, run.id)] = run
+    provider = FakeProvider(['{"type":"final","content":"done"}'])
+    monkeypatch.setattr("backend.app.runtime.agent_runner.get_provider", lambda _provider: provider)
+    async def fake_publish(*a, **kw): pass
+    monkeypatch.setattr("backend.app.runtime.agent_runner.event_bus.publish", fake_publish)
+
+    result = await AgentRunner().start_queued_run(
+        db, session=session, run=run, user_id=session.created_by_user_id, job_id="test-job"
+    )
+
+    assert result.status == "completed"
+    assert len(provider.calls) >= 1
+    assert provider.calls[0]["model"] == "gemma4:31b-cloud"
+    assert provider.calls[0]["model"] != session.model_name

@@ -18,6 +18,7 @@ async def session_websocket(
     await event_bus.subscribe(websocket, session_id=session_id)
     try:
         await event_bus.replay_session_events(db, websocket, session_id=session_id)
+        await db.commit()
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:

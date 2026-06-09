@@ -127,12 +127,21 @@ class EventBus:
             targets = set(self._global_subscribers)
             if session_id:
                 targets.update(self._session_subscribers.get(str(session_id), set()))
-        stale: list[WebSocket] = []
-        for websocket in targets:
+        if not targets:
+            return
+        asyncio.create_task(self._broadcast_send(envelope, targets))
+
+    async def _broadcast_send(self, envelope: dict[str, Any], targets: set[WebSocket]) -> None:
+        async def _send(ws: WebSocket) -> None:
             try:
-                await websocket.send_json(envelope)
-            except Exception:
-                stale.append(websocket)
+                await asyncio.wait_for(ws.send_json(envelope), timeout=5)
+            except (asyncio.TimeoutError, Exception):
+                raise
+
+        results = await asyncio.gather(*[_send(ws) for ws in targets], return_exceptions=True)
+        stale: list[WebSocket] = [
+            ws for ws, exc in zip(targets, results) if isinstance(exc, Exception)
+        ]
         if stale:
             async with self._lock:
                 for websocket in stale:
@@ -151,14 +160,20 @@ class EventBus:
     async def _publish_redis(self, *, session_id: UUID, envelope: dict[str, Any]) -> bool:
         client = self._redis_factory()
         try:
-            await client.publish(self.redis_channel(session_id), json.dumps(envelope, default=str))
+            await asyncio.wait_for(
+                client.publish(self.redis_channel(session_id), json.dumps(envelope, default=str)),
+                timeout=5,
+            )
             return True
-        except (RedisError, OSError, ValueError, TypeError):
+        except (asyncio.TimeoutError, RedisError, OSError, ValueError, TypeError):
             return False
         finally:
             close = getattr(client, "aclose", None)
             if close:
-                await close()
+                try:
+                    await asyncio.wait_for(close(), timeout=2)
+                except (asyncio.TimeoutError, Exception):
+                    pass
 
     async def _redis_forward_loop(self, websocket: WebSocket, session_id: UUID) -> None:
         client = self._redis_factory()

@@ -485,6 +485,73 @@ h3 {
   line-height: 1.4;
 }
 
+.model-mismatch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 14px 0;
+  color: #f0c674;
+  font-size: 12px;
+}
+
+.lsp-status-section {
+  margin: 12px 14px 0;
+}
+
+.lsp-status-section h3 {
+  font-size: 13px;
+  color: #9e988c;
+  margin-bottom: 8px;
+}
+
+.lsp-server-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.lsp-server-card {
+  background: #0d0d0c;
+  border: 1px solid #2d2b26;
+  border-radius: 6px;
+  padding: 10px;
+  min-width: 200px;
+}
+
+.lsp-server-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.lsp-server-head strong {
+  color: #fff9eb;
+  font-size: 14px;
+  text-transform: capitalize;
+}
+
+.lsp-server-card span {
+  color: #9e988c;
+  font-size: 12px;
+}
+
+.lsp-server-card code {
+  display: block;
+  color: #b8e2cc;
+  font-size: 11px;
+  margin-top: 4px;
+}
+
+.lsp-server-card em {
+  display: block;
+  color: #ffb4a9;
+  font-size: 11px;
+  margin-top: 4px;
+  font-style: normal;
+}
+
 .chat-transcript {
   flex: 1;
   min-height: 420px;

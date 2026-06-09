@@ -407,16 +407,24 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 export const WS_BASE = import.meta.env.VITE_WS_BASE_URL ?? "ws://localhost:8000";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers: {
-      "content-type": "application/json",
-      ...(init?.headers ?? {})
-    }
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      ...init,
+      headers: {
+        "content-type": "application/json",
+        ...(init?.headers ?? {})
+      }
+    });
+  } catch (err) {
+    const method = init?.method ?? "GET";
+    const url = `${API_BASE}${path}`;
+    const detail = err instanceof TypeError ? err.message : String(err);
+    throw new Error(`${method} ${url} failed — ${detail}`);
+  }
   if (!response.ok) {
     const body = await response.text();
-    throw new Error(body || response.statusText);
+    throw new Error(`${response.status} ${path}: ${body || response.statusText}`);
   }
   return response.json() as Promise<T>;
 }

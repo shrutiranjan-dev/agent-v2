@@ -209,7 +209,7 @@ class ClickHouseConfig(BaseModel):
 
 class OllamaConfig(BaseModel):
     base_url: str = "http://localhost:11434"
-    default_model: str = "qwen2.5:latest"
+    default_model: str = "qwen2.5-coder:7b"
     build_model: str | None = None
     plan_model: str | None = None
     general_model: str | None = None
